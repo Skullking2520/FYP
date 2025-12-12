@@ -19,6 +19,9 @@ export default function RegisterPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+  const envMissing = !apiBaseUrl;
+
   useEffect(() => {
     if (!loading && token) {
       router.replace("/dashboard");
@@ -34,6 +37,13 @@ export default function RegisterPage() {
     event.preventDefault();
     setSubmitting(true);
     setError(null);
+
+    if (envMissing) {
+      setSubmitting(false);
+      setError("NEXT_PUBLIC_API_BASE_URL is not set. Add it to your environment (see .env.example). Then restart `npm run dev`.");
+      return;
+    }
+
     try {
       await registerRequest({
         email: form.email,
@@ -62,6 +72,15 @@ export default function RegisterPage() {
         {error && (
           <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
             {error}
+          </div>
+        )}
+
+        {envMissing && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <div className="font-semibold">Backend URL not configured</div>
+            <div className="mt-1 text-amber-800">
+              Set <span className="font-mono">NEXT_PUBLIC_API_BASE_URL</span> in <span className="font-mono">.env.local</span> (copy from <span className="font-mono">.env.example</span>), then restart the dev server.
+            </div>
           </div>
         )}
         <form className="grid gap-3" onSubmit={handleSubmit}>
@@ -121,7 +140,7 @@ export default function RegisterPage() {
               />
             </label>
           </div>
-          <button className="mt-2 w-full rounded-xl bg-blue-600 px-4 py-2 text-white disabled:opacity-50" disabled={submitting}>
+          <button className="mt-2 w-full rounded-xl bg-blue-600 px-4 py-2 text-white disabled:opacity-50" disabled={submitting || envMissing}>
             {submitting ? "Creating account..." : "Create account"}
           </button>
         </form>

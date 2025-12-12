@@ -12,6 +12,9 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+  const envMissing = !apiBaseUrl;
+
   useEffect(() => {
     if (!loading && token) {
       router.replace("/dashboard");
@@ -21,6 +24,12 @@ export default function LoginPage() {
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
+
+    if (envMissing) {
+      setError("NEXT_PUBLIC_API_BASE_URL is not set. Add it to your environment (see .env.example). Then restart `npm run dev`.");
+      return;
+    }
+
     setSubmitting(true);
     try {
       await login(email, password);
@@ -43,6 +52,15 @@ export default function LoginPage() {
         {error && (
           <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
             {error}
+          </div>
+        )}
+
+        {envMissing && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <div className="font-semibold">Backend URL not configured</div>
+            <div className="mt-1 text-amber-800">
+              Set <span className="font-mono">NEXT_PUBLIC_API_BASE_URL</span> in <span className="font-mono">.env.local</span> (copy from <span className="font-mono">.env.example</span>), then restart the dev server.
+            </div>
           </div>
         )}
         <form className="space-y-3" onSubmit={handleSubmit}>
@@ -70,7 +88,7 @@ export default function LoginPage() {
           </label>
           <button
             className="w-full rounded-xl bg-blue-600 text-white px-4 py-2 disabled:opacity-50"
-            disabled={submitting}
+            disabled={submitting || envMissing}
           >
             {submitting ? "Signing in..." : "Sign in"}
           </button>
