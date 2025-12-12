@@ -1,9 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import { AdminTable } from "@/components/admin/AdminTable";
+import { useAuth } from "@/components/auth-provider";
 import { getProgramById } from "@/data/programs";
 import { PROGRAM_UNIS } from "@/data/universities";
+import { isAdminUserEmail } from "@/lib/admin";
 import type { ProgramId, UniversityProgram } from "@/types";
 
 type Row = {
@@ -12,7 +15,25 @@ type Row = {
 };
 
 export default function AdminUniversitiesPage() {
+  const router = useRouter();
+  const { token, user, loading } = useAuth();
+  const isAdmin = isAdminUserEmail(user?.email);
   const [query, setQuery] = useState("");
+
+  useEffect(() => {
+    if (loading) return;
+    if (!token) {
+      router.replace("/login");
+      return;
+    }
+    if (!isAdmin) {
+      router.replace("/dashboard");
+    }
+  }, [loading, token, isAdmin, router]);
+
+  if (!token || !isAdmin) {
+    return null;
+  }
 
   const rows = useMemo<Row[]>(() => {
     return Object.entries(PROGRAM_UNIS).flatMap(([programId, unis]) =>

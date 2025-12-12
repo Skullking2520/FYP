@@ -3,12 +3,12 @@
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { useAuth } from "@/components/auth-provider";
-
-const ADMIN_EMAIL = process.env.NEXT_PUBLIC_ADMIN_EMAIL?.toLowerCase();
+import { isAdminUserEmail } from "@/lib/admin";
 
 export default function AdminPage() {
   const router = useRouter();
   const { token, user, loading } = useAuth();
+  const isAdmin = isAdminUserEmail(user?.email);
 
   useEffect(() => {
     if (loading) {
@@ -18,12 +18,12 @@ export default function AdminPage() {
       router.replace("/login");
       return;
     }
-    if (ADMIN_EMAIL && user?.email?.toLowerCase() !== ADMIN_EMAIL) {
+    if (!isAdmin) {
       router.replace("/dashboard");
     }
-  }, [loading, token, user, router]);
+  }, [loading, token, isAdmin, router]);
 
-  if (!token || (ADMIN_EMAIL && user?.email?.toLowerCase() !== ADMIN_EMAIL)) {
+  if (!token || !isAdmin) {
     return null;
   }
 

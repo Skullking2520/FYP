@@ -1,12 +1,33 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { useAuth } from "@/components/auth-provider";
 import { AdminTable } from "@/components/admin/AdminTable";
 import { PROGRAMS } from "@/data/programs";
+import { isAdminUserEmail } from "@/lib/admin";
 import type { Program } from "@/types";
 
 export default function AdminProgramsPage() {
+  const router = useRouter();
+  const { token, user, loading } = useAuth();
+  const isAdmin = isAdminUserEmail(user?.email);
   const [query, setQuery] = useState("");
+
+  useEffect(() => {
+    if (loading) return;
+    if (!token) {
+      router.replace("/login");
+      return;
+    }
+    if (!isAdmin) {
+      router.replace("/dashboard");
+    }
+  }, [loading, token, isAdmin, router]);
+
+  if (!token || !isAdmin) {
+    return null;
+  }
 
   const data = useMemo(() => {
     const lower = query.toLowerCase();
