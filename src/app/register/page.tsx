@@ -22,6 +22,24 @@ export default function RegisterPage() {
   const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
   const envMissing = !apiBaseUrl;
 
+  const COUNTRY_OPTIONS = [
+    "",
+    "Malaysia",
+    "Singapore",
+    "Indonesia",
+    "Thailand",
+    "Vietnam",
+    "Philippines",
+    "India",
+    "China",
+    "South Korea",
+    "Japan",
+    "Australia",
+    "United States",
+    "United Kingdom",
+    "Other",
+  ];
+
   useEffect(() => {
     if (!loading && token) {
       router.replace("/dashboard");
@@ -29,6 +47,11 @@ export default function RegisterPage() {
   }, [loading, token, router]);
 
   const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = event.target;
+    setForm((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleSelectChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     const { name, value } = event.target;
     setForm((prev) => ({ ...prev, [name]: value }));
   };
@@ -132,12 +155,18 @@ export default function RegisterPage() {
             </label>
             <label className="text-sm">
               <span className="text-slate-600">Country</span>
-              <input
+              <select
                 className="mt-1 w-full rounded-xl border px-3 py-2"
                 name="country"
                 value={form.country}
-                onChange={handleChange}
-              />
+                onChange={handleSelectChange}
+              >
+                {COUNTRY_OPTIONS.map((option) => (
+                  <option key={option || "__empty"} value={option}>
+                    {option ? option : "Select a country"}
+                  </option>
+                ))}
+              </select>
             </label>
           </div>
           <button className="mt-2 w-full rounded-xl bg-blue-600 px-4 py-2 text-white disabled:opacity-50" disabled={submitting || envMissing}>
