@@ -2,7 +2,10 @@ import type {
   BackendJob,
   BackendJobRecommendation,
   BackendJobSkill,
+  BackendMajorRecommendation,
+  BackendMajorSkill,
   BackendSkill,
+  MajorGapsRequest,
   RecommendJobsRequest,
 } from "@/types/api";
 
@@ -83,4 +86,24 @@ export async function getJob(job_id: string): Promise<BackendJob> {
 
 export async function getJobSkills(job_id: string): Promise<BackendJobSkill[]> {
   return backendFetch<BackendJobSkill[]>(`/api/jobs/${encodeURIComponent(job_id)}/skills`, { method: "GET" });
+}
+
+export async function getJobMajors(job_id: string, top_k = 5): Promise<BackendMajorRecommendation[]> {
+  const params = new URLSearchParams({ top_k: String(top_k) });
+  return backendFetch<BackendMajorRecommendation[]>(
+    `/api/jobs/${encodeURIComponent(job_id)}/majors?${params.toString()}`,
+    { method: "GET" },
+  );
+}
+
+export async function getMajorSkills(major_id: string): Promise<BackendMajorSkill[]> {
+  return backendFetch<BackendMajorSkill[]>(`/api/majors/${encodeURIComponent(major_id)}/skills`, { method: "GET" });
+}
+
+export async function getMajorGaps(major_id: string, skill_keys: string[]): Promise<BackendMajorSkill[]> {
+  const payload: MajorGapsRequest = { skill_keys: skill_keys.slice(0, 200) };
+  return backendFetch<BackendMajorSkill[]>(`/api/majors/${encodeURIComponent(major_id)}/gaps`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
