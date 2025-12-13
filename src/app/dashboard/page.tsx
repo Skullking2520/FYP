@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
+import { SkillPicker, type SelectedSkill } from "@/components/skill-picker";
+import { searchSkills } from "@/lib/backend-api";
 import { extractSkills, updateProfile } from "@/lib/api";
 
 type FormState = {
@@ -25,10 +27,31 @@ export default function DashboardPage() {
   const router = useRouter();
   const { token, user, loading, refreshProfile, logout } = useAuth();
   const [form, setForm] = useState<FormState>(emptyForm);
+  const [selectedSkills, setSelectedSkills] = useState<SelectedSkill[]>([]);
   const [saving, setSaving] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("selected_skills_v1");
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return;
+      const restored = parsed
+        .filter((item) => item && typeof item.skill_key === "string" && typeof item.name === "string")
+        .map((item) => ({ skill_key: item.skill_key as string, name: item.name as string }));
+      setSelectedSkills(restored);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("selected_skills_v1", JSON.stringify(selectedSkills));
+    setForm((prev) => ({ ...prev, skills_text: selectedSkills.map((s) => s.name).join(", ") }));
+  }, [selectedSkills]);
 
   useEffect(() => {
     if (!loading && !token) {
@@ -98,9 +121,29 @@ export default function DashboardPage() {
     setExtracting(true);
     try {
       const response = await extractSkills(source, token);
-      const uniqueSkills = Array.from(new Set(response.skills.map((skill) => skill.skill_name).filter(Boolean)));
-      setForm((prev) => ({ ...prev, skills_text: uniqueSkills.join(", ") }));
-      setStatus("Skills extracted from your text");
+      const names = Array.from(new Set(response.skills.map((skill) => skill.skill_name).filter(Boolean)));
+      const limited = names.slice(0, 25);
+
+      const lookedUp = await Promise.all(
+        limited.map(async (name) => {
+          const results = await searchSkills(name);
+          const exact = results.find((s) => s.name.toLowerCase() === name.toLowerCase());
+          const best = exact ?? results[0];
+          if (!best) return null;
+          return { skill_key: best.skill_key, name: best.name } satisfies SelectedSkill;
+        }),
+      );
+
+      const next = lookedUp.filter((x): x is SelectedSkill => Boolean(x));
+      setSelectedSkills((prev) => {
+        const existing = new Set(prev.map((s) => s.skill_key));
+        const merged = [...prev];
+        for (const s of next) {
+          if (!existing.has(s.skill_key)) merged.push(s);
+        }
+        return merged;
+      });
+      setStatus("Skills extracted and added to your selection");
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to extract skills";
       setError(message);
@@ -190,15 +233,10 @@ export default function DashboardPage() {
               />
             </label>
             <label className="text-sm text-slate-600">
-              Skills (comma separated)
-              <textarea
-                className="mt-1 w-full rounded-2xl border px-3 py-2"
-                name="skills_text"
-                rows={4}
-                placeholder="Python, machine learning, Unity, Arduino"
-                value={form.skills_text}
-                onChange={handleChange}
-              />
+              Skills
+              <div className="mt-2">
+                <SkillPicker value={selectedSkills} onChange={setSelectedSkills} />
+              </div>
             </label>
             {error && <p className="text-sm text-red-600">{error}</p>}
             {status && <p className="text-sm text-green-600">{status}</p>}
