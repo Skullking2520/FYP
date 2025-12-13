@@ -270,7 +270,7 @@ export default function DashboardPage() {
           </div>
           <button
             className="w-full rounded-xl bg-slate-900 px-4 py-2 text-white"
-            onClick={() => router.push("/recommendations")}
+            onClick={() => router.push("/pathway/jobs")}
             disabled={!user}
           >
             Get recommendations

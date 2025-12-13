@@ -97,3 +97,55 @@ export type BackendJobSkill = {
   dimension?: string | null;
   [key: string]: unknown;
 };
+
+// --- Backend major/program/resource APIs (FastAPI) ---
+// 1) GET /api/jobs/{job_id}/majors?top_k=5
+//    Response: [{ major_id, major_name, matched_skills, score }]
+// 2) POST /api/majors/{major_id}/gaps { skill_keys: string[] } (max 200)
+//    Response: [{ skill_key, name, source, dimension, importance }]
+// 3) GET /api/majors/{major_id}/programs?top_k=10
+//    Response: [{ program_id, program_name, university_name, ranking_source, ranking_year, rank_position, rank_band, score }]
+// 4) GET /api/skills/{skill_key}/resources?top_k=10
+//    Response: [{ resource_id, title, provider, type, difficulty, estimated_hours, url, description }]
+
+export type BackendMajorRecommendation = {
+  major_id: number | string;
+  major_name: string;
+  matched_skills: number;
+  score: number;
+};
+
+export type MajorGapsRequest = {
+  skill_keys: string[];
+};
+
+export type BackendMajorSkill = {
+  skill_key?: string;
+  name?: string;
+  source?: string | null;
+  dimension?: string | null;
+  importance?: number | null;
+  [key: string]: unknown;
+};
+
+export type BackendMajorProgramRanking = {
+  program_id: number | string;
+  program_name: string;
+  university_name: string;
+  ranking_source?: string | null;
+  ranking_year?: number | null;
+  rank_position?: number | null;
+  rank_band?: string | null;
+  score: number;
+};
+
+export type BackendSkillResource = {
+  resource_id: number | string;
+  title: string;
+  provider: string;
+  type: string;
+  difficulty: string;
+  estimated_hours: number;
+  url: string;
+  description: string;
+};
