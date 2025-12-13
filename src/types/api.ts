@@ -97,3 +97,33 @@ export type BackendJobSkill = {
   dimension?: string | null;
   [key: string]: unknown;
 };
+
+// --- Backend major recommendation / gap analysis APIs (FastAPI) ---
+// 1) GET /api/jobs/{job_id}/majors?top_k=5
+//    Response: [{major_id, major_name, matched_skills, score}]
+// 2) GET /api/majors/{major_id}/skills
+//    Response: required skills ordered by importance desc
+// 3) POST /api/majors/{major_id}/gaps { skill_keys: string[] }
+//    Response: missing skills ordered by importance desc
+
+export type BackendMajorRecommendation = {
+  major_id: number | string;
+  major_name: string;
+  matched_skills: number;
+  score: number;
+};
+
+export type MajorGapsRequest = {
+  skill_keys: string[];
+};
+
+export type BackendMajorSkill = {
+  id?: number | string;
+  skill_key?: string;
+  name?: string;
+  skill_name?: string;
+  importance?: number | null;
+  source?: string | null;
+  dimension?: string | null;
+  [key: string]: unknown;
+};

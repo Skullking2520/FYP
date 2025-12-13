@@ -1,0 +1,17 @@
+export const COUNTRY_OPTIONS = [
+  "",
+  "Malaysia",
+  "Singapore",
+  "Indonesia",
+  "Thailand",
+  "Vietnam",
+  "Philippines",
+  "India",
+  "China",
+  "South Korea",
+  "Japan",
+  "Australia",
+  "United States",
+  "United Kingdom",
+  "Other",
+];

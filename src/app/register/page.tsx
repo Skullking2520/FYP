@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { registerRequest } from "@/lib/api";
+import { COUNTRY_OPTIONS } from "@/lib/countries";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -21,24 +22,6 @@ export default function RegisterPage() {
 
   const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
   const envMissing = !apiBaseUrl;
-
-  const COUNTRY_OPTIONS = [
-    "",
-    "Malaysia",
-    "Singapore",
-    "Indonesia",
-    "Thailand",
-    "Vietnam",
-    "Philippines",
-    "India",
-    "China",
-    "South Korea",
-    "Japan",
-    "Australia",
-    "United States",
-    "United Kingdom",
-    "Other",
-  ];
 
   useEffect(() => {
     if (!loading && token) {

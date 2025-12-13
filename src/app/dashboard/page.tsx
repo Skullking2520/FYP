@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { extractSkills, updateProfile } from "@/lib/api";
+import { COUNTRY_OPTIONS } from "@/lib/countries";
 
 type FormState = {
   name: string;
@@ -53,7 +54,7 @@ export default function DashboardPage() {
     return Math.round((filled / Object.keys(form).length) * 100);
   }, [form]);
 
-  const handleChange = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleChange = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = event.target;
     setForm((prev) => ({ ...prev, [name]: value }));
   };
@@ -157,13 +158,18 @@ export default function DashboardPage() {
               </label>
               <label className="text-sm text-slate-600">
                 Country
-                <input
+                <select
                   className="mt-1 w-full rounded-xl border px-3 py-2"
                   name="country"
                   value={form.country}
                   onChange={handleChange}
-                  placeholder="Malaysia"
-                />
+                >
+                  {COUNTRY_OPTIONS.map((option) => (
+                    <option key={option || "__empty"} value={option}>
+                      {option ? option : "Select a country"}
+                    </option>
+                  ))}
+                </select>
               </label>
             </div>
             <label className="text-sm text-slate-600">
