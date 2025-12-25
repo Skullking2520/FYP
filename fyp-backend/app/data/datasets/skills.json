@@ -1,0 +1,17 @@
+[
+  {
+    "skill": "python",
+    "title": "Python Programming",
+    "url": "https://skills.example.com/python"
+  },
+  {
+    "skill": "machine learning",
+    "title": "Machine Learning Foundations",
+    "url": "https://skills.example.com/ml"
+  },
+  {
+    "skill": "network security",
+    "title": "Network Security Essentials",
+    "url": "https://skills.example.com/security"
+  }
+]

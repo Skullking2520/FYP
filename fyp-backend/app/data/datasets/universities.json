@@ -1,0 +1,24 @@
+[
+  {
+    "uni_id": "u_stem_academy",
+    "uni_name": "STEM Academy",
+    "program_id": "prog_ai",
+    "program_url": "https://stem.example.edu/ai",
+    "rank": 12,
+    "required_skills": ["python", "linear algebra"],
+    "entry_requirements": ["A-level Mathematics", "Personal statement"],
+    "country": "SG",
+    "subject_strength": "Computer Science"
+  },
+  {
+    "uni_id": "u_pacific_tech",
+    "uni_name": "Pacific Tech",
+    "program_id": "prog_cyber",
+    "program_url": "https://pacific.example.edu/cyber",
+    "rank": 28,
+    "required_skills": ["network security", "python"],
+    "entry_requirements": ["Mathematics", "Physics"],
+    "country": "US",
+    "subject_strength": "Engineering"
+  }
+]
