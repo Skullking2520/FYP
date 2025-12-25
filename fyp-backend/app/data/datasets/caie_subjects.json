@@ -1,0 +1,28 @@
+{
+  "alevel": [
+    "Accounting",
+    "Biology",
+    "Business",
+    "Chemistry",
+    "Computer Science",
+    "Economics",
+    "English Language",
+    "English Literature",
+    "Further Mathematics",
+    "Mathematics",
+    "Physics",
+    "Psychology"
+  ],
+  "olevel": [
+    "Accounting",
+    "Biology",
+    "Business Studies",
+    "Chemistry",
+    "Computer Science",
+    "Economics",
+    "English Language",
+    "English Literature",
+    "Mathematics",
+    "Physics"
+  ]
+}

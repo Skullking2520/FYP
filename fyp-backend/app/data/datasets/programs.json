@@ -1,0 +1,20 @@
+[
+  {
+    "id": "prog_ai",
+    "name": "Artificial Intelligence",
+    "description": "Focus on machine learning, data mining, and intelligent systems for real-world problem solving.",
+    "tags": ["ai", "ml", "data"],
+    "focus_areas": ["Machine Learning", "Data Science"],
+    "related_skills": ["python", "machine learning", "statistics"],
+    "keywords": ["neural networks", "deep learning"]
+  },
+  {
+    "id": "prog_cyber",
+    "name": "Cybersecurity Engineering",
+    "description": "Covers secure software, network defense, and digital forensics with an applied emphasis.",
+    "tags": ["security", "networks"],
+    "focus_areas": ["Cybersecurity", "Networks"],
+    "related_skills": ["network security", "risk analysis", "python"],
+    "keywords": ["penetration testing", "cloud security"]
+  }
+]

@@ -1,0 +1,84 @@
+{
+  "alevel": {
+    "Accounting": [
+      {"skill_key": "accounting", "base_level": 1},
+      {"skill_key": "financial analysis", "base_level": 1}
+    ],
+    "Biology": [
+      {"skill_key": "biology", "base_level": 1},
+      {"skill_key": "scientific method", "base_level": 1}
+    ],
+    "Business": [
+      {"skill_key": "business", "base_level": 1},
+      {"skill_key": "management", "base_level": 1}
+    ],
+    "Chemistry": [
+      {"skill_key": "chemistry", "base_level": 1},
+      {"skill_key": "laboratory skills", "base_level": 1}
+    ],
+    "Computer Science": [
+      {"skill_key": "programming", "base_level": 1},
+      {"skill_key": "computer science", "base_level": 1}
+    ],
+    "Economics": [
+      {"skill_key": "economics", "base_level": 1},
+      {"skill_key": "data analysis", "base_level": 1}
+    ],
+    "English Language": [
+      {"skill_key": "communication", "base_level": 1},
+      {"skill_key": "writing", "base_level": 1}
+    ],
+    "English Literature": [
+      {"skill_key": "critical reading", "base_level": 1},
+      {"skill_key": "writing", "base_level": 1}
+    ],
+    "Further Mathematics": [
+      {"skill_key": "math", "base_level": 2},
+      {"skill_key": "problem solving", "base_level": 2}
+    ],
+    "Mathematics": [
+      {"skill_key": "math", "base_level": 1},
+      {"skill_key": "problem solving", "base_level": 1}
+    ],
+    "Physics": [
+      {"skill_key": "physics", "base_level": 1},
+      {"skill_key": "scientific method", "base_level": 1}
+    ],
+    "Psychology": [
+      {"skill_key": "psychology", "base_level": 1},
+      {"skill_key": "research", "base_level": 1}
+    ]
+  },
+  "olevel": {
+    "Accounting": [
+      {"skill_key": "accounting", "base_level": 1}
+    ],
+    "Biology": [
+      {"skill_key": "biology", "base_level": 1}
+    ],
+    "Business Studies": [
+      {"skill_key": "business", "base_level": 1}
+    ],
+    "Chemistry": [
+      {"skill_key": "chemistry", "base_level": 1}
+    ],
+    "Computer Science": [
+      {"skill_key": "programming", "base_level": 1}
+    ],
+    "Economics": [
+      {"skill_key": "economics", "base_level": 1}
+    ],
+    "English Language": [
+      {"skill_key": "communication", "base_level": 1}
+    ],
+    "English Literature": [
+      {"skill_key": "critical reading", "base_level": 1}
+    ],
+    "Mathematics": [
+      {"skill_key": "math", "base_level": 1}
+    ],
+    "Physics": [
+      {"skill_key": "physics", "base_level": 1}
+    ]
+  }
+}

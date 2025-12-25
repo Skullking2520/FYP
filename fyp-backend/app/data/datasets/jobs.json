@@ -1,0 +1,16 @@
+[
+  {
+    "job_id": "job_data_scientist",
+    "job_title": "Data Scientist",
+    "job_description": "Builds predictive models and analytical pipelines for product teams.",
+    "skills_required": ["python", "machine learning", "statistics"],
+    "weight": 0.9
+  },
+  {
+    "job_id": "job_cyber_analyst",
+    "job_title": "Cybersecurity Analyst",
+    "job_description": "Monitors systems, responds to incidents, and improves security posture.",
+    "skills_required": ["network security", "risk analysis", "python"],
+    "weight": 0.85
+  }
+]
