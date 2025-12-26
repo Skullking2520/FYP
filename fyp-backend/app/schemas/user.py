@@ -1,13 +1,25 @@
 # user.py
 from typing import Optional
-from pydantic import BaseModel, ConfigDict, EmailStr
+
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class UserBase(BaseModel):
-    email: EmailStr
+    email: str
     name: Optional[str] = None
     age: Optional[int] = None
     country: Optional[str] = None
+
+    @field_validator("email")
+    @classmethod
+    def _validate_email_like(cls, v: str) -> str:
+        value = (v or "").strip()
+        if "@" not in value:
+            raise ValueError("email must contain '@'")
+        left, right = value.split("@", 1)
+        if not left or not right:
+            raise ValueError("email must have text before and after '@'")
+        return value
 
 
 class UserCreate(UserBase):
@@ -15,8 +27,19 @@ class UserCreate(UserBase):
 
 
 class UserLogin(BaseModel):
-    email: EmailStr
+    email: str
     password: str
+
+    @field_validator("email")
+    @classmethod
+    def _validate_email_like(cls, v: str) -> str:
+        value = (v or "").strip()
+        if "@" not in value:
+            raise ValueError("email must contain '@'")
+        left, right = value.split("@", 1)
+        if not left or not right:
+            raise ValueError("email must have text before and after '@'")
+        return value
 
 
 class UserRead(UserBase):

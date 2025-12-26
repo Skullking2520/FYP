@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { SkillResourceCard } from "@/components/skill-resource-card";
 import { getJobMajors, getMajorGaps, getMajorPrograms, getSkillResources } from "@/lib/backend-api";
 import { loadSelectedJob, loadSelectedMajor, saveSelectedMajor } from "@/lib/pathway-storage";
-import { loadSelectedSkillsFromStorage, SELECTED_SKILLS_STORAGE_KEY } from "@/lib/skills-storage";
+import { expandSkillKeysWithLevels, loadSelectedSkillsFromStorage, SELECTED_SKILLS_STORAGE_KEY } from "@/lib/skills-storage";
 import type { BackendMajorProgramRanking, BackendMajorSkill, BackendSkillResource } from "@/types/api";
 import type { SkillResource } from "@/types";
 import type { SelectedSkill } from "@/components/skill-picker";
@@ -13,6 +13,7 @@ import type { SelectedSkill } from "@/components/skill-picker";
 function getMajorSkillDisplayName(skill: BackendMajorSkill): string {
   return (
     (typeof skill.name === "string" && skill.name) ||
+    (typeof (skill as { skill_name?: unknown }).skill_name === "string" && (skill as { skill_name: string }).skill_name) ||
     (typeof skill.skill_key === "string" && skill.skill_key) ||
     "(unknown skill)"
   );
@@ -41,7 +42,7 @@ export default function PathwayPlanPage() {
 
   const [skills, setSkills] = useState<SelectedSkill[]>([]);
 
-  const skillKeys = useMemo(() => skills.map((s) => s.skill_key), [skills]);
+  const skillKeys = useMemo(() => expandSkillKeysWithLevels(skills), [skills]);
 
   const [programs, setPrograms] = useState<BackendMajorProgramRanking[]>([]);
   const [programsLoading, setProgramsLoading] = useState(false);
@@ -55,6 +56,37 @@ export default function PathwayPlanPage() {
   const [resources, setResources] = useState<BackendSkillResource[]>([]);
   const [resourcesLoading, setResourcesLoading] = useState(false);
   const [resourcesError, setResourcesError] = useState<string | null>(null);
+
+  const scrollToResources = () => {
+    const el = document.getElementById("learning-resources");
+    if (el) el.scrollIntoView();
+  };
+
+  const getProgramCell = (p: BackendMajorProgramRanking, key: string): unknown => (p as Record<string, unknown>)[key];
+  const getProgramId = (p: BackendMajorProgramRanking): string =>
+    String(getProgramCell(p, "program_id") ?? getProgramCell(p, "id") ?? getProgramCell(p, "programId") ?? "");
+  const getProgramName = (p: BackendMajorProgramRanking): string =>
+    String(getProgramCell(p, "program_name") ?? getProgramCell(p, "name") ?? getProgramCell(p, "program") ?? "—");
+  const getUniversityName = (p: BackendMajorProgramRanking): string =>
+    String(getProgramCell(p, "university_name") ?? getProgramCell(p, "university") ?? getProgramCell(p, "school") ?? "—");
+  const getRankPosition = (p: BackendMajorProgramRanking): number | null => {
+    const v = getProgramCell(p, "rank_position") ?? getProgramCell(p, "rank") ?? getProgramCell(p, "rankPosition");
+    return typeof v === "number" && Number.isFinite(v) ? v : null;
+  };
+  const getRankBand = (p: BackendMajorProgramRanking): string | null => {
+    const v = getProgramCell(p, "rank_band") ?? getProgramCell(p, "rankBand");
+    return typeof v === "string" && v.trim() ? v : null;
+  };
+  const getRankingSource = (p: BackendMajorProgramRanking): string =>
+    String(getProgramCell(p, "ranking_source") ?? getProgramCell(p, "source") ?? "—");
+  const getRankingYear = (p: BackendMajorProgramRanking): string => {
+    const v = getProgramCell(p, "ranking_year") ?? getProgramCell(p, "year") ?? getProgramCell(p, "rankingYear");
+    return typeof v === "number" && Number.isFinite(v) ? String(v) : typeof v === "string" && v.trim() ? v : "—";
+  };
+  const getScore = (p: BackendMajorProgramRanking): string => {
+    const v = getProgramCell(p, "score") ?? getProgramCell(p, "match_score") ?? getProgramCell(p, "matchScore");
+    return typeof v === "number" && Number.isFinite(v) ? String(v) : typeof v === "string" && v.trim() ? v : "—";
+  };
 
   useEffect(() => {
     const job = loadSelectedJob();
@@ -147,6 +179,7 @@ export default function PathwayPlanPage() {
       cancelled = true;
     };
   }, [majorId]);
+
 
   useEffect(() => {
     if (!majorId) return;
@@ -264,15 +297,15 @@ export default function PathwayPlanPage() {
               </thead>
               <tbody>
                 {programs.map((p) => (
-                  <tr key={String(p.program_id)} className="border-t">
-                    <td className="px-4 py-4 font-medium text-slate-900">{p.program_name}</td>
-                    <td className="px-4 py-4 text-slate-700">{p.university_name}</td>
+                  <tr key={getProgramId(p) || `${getProgramName(p)}-${getUniversityName(p)}`} className="border-t">
+                    <td className="px-4 py-4 font-medium text-slate-900">{getProgramName(p)}</td>
+                    <td className="px-4 py-4 text-slate-700">{getUniversityName(p)}</td>
                     <td className="px-4 py-4 text-slate-700">
-                      {typeof p.rank_position === "number" ? `#${p.rank_position}` : p.rank_band ?? "—"}
+                      {getRankPosition(p) != null ? `#${getRankPosition(p)}` : getRankBand(p) ?? "—"}
                     </td>
-                    <td className="px-4 py-4 text-slate-700">{p.ranking_source ?? "—"}</td>
-                    <td className="px-4 py-4 text-slate-700">{p.ranking_year ?? "—"}</td>
-                    <td className="px-4 py-4 text-slate-700">{p.score}</td>
+                    <td className="px-4 py-4 text-slate-700">{getRankingSource(p)}</td>
+                    <td className="px-4 py-4 text-slate-700">{getRankingYear(p)}</td>
+                    <td className="px-4 py-4 text-slate-700">{getScore(p)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -296,10 +329,19 @@ export default function PathwayPlanPage() {
           <ul className="mt-4 space-y-2">
             {gaps.map((skill, idx) => {
               const name = getMajorSkillDisplayName(skill);
-              const isSelected =
-                typeof selectedGapSkill?.skill_key === "string" &&
-                typeof skill.skill_key === "string" &&
-                selectedGapSkill.skill_key === skill.skill_key;
+              const selectedKey =
+                typeof (selectedGapSkill as { skill_id?: unknown } | null)?.skill_id === "number"
+                  ? String((selectedGapSkill as { skill_id: number }).skill_id)
+                  : typeof selectedGapSkill?.skill_key === "string"
+                    ? selectedGapSkill.skill_key
+                    : null;
+              const currentKey =
+                typeof (skill as { skill_id?: unknown }).skill_id === "number"
+                  ? String((skill as { skill_id: number }).skill_id)
+                  : typeof skill.skill_key === "string"
+                    ? skill.skill_key
+                    : null;
+              const isSelected = Boolean(selectedKey && currentKey && selectedKey === currentKey);
               return (
                 <li key={`${skill.skill_key ?? name}-${idx}`} className="rounded-xl border p-4">
                   <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
@@ -319,8 +361,10 @@ export default function PathwayPlanPage() {
                         setResources([]);
                         setResourcesError(null);
                         setResourcesLoading(true);
+                        queueMicrotask(scrollToResources);
                         try {
-                          const key = typeof skill.skill_key === "string" ? skill.skill_key : "";
+                          const id = (skill as { skill_id?: unknown }).skill_id;
+                          const key = typeof id === "number" && Number.isFinite(id) ? String(id) : typeof skill.skill_key === "string" ? skill.skill_key : "";
                           const result = await getSkillResources(key, 10);
                           setResources(Array.isArray(result) ? result : []);
                         } catch (err) {
@@ -328,6 +372,7 @@ export default function PathwayPlanPage() {
                           setResourcesError(message);
                         } finally {
                           setResourcesLoading(false);
+                          queueMicrotask(scrollToResources);
                         }
                       }}
                     >
@@ -342,7 +387,7 @@ export default function PathwayPlanPage() {
       </section>
 
       {selectedGapSkill && (
-        <section className="rounded-2xl border bg-white p-6 shadow-sm">
+        <section id="learning-resources" className="rounded-2xl border bg-white p-6 shadow-sm">
           <h2 className="text-lg font-semibold text-slate-900">Learning resources</h2>
           <p className="mt-1 text-sm text-slate-600">For: {selectedSkillName}</p>
 

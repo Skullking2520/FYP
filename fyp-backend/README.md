@@ -81,24 +81,24 @@ docker compose up -d mysql
 4. Launch the API server.
 
    ```bash
-   uvicorn app.main:app --reload --port 8001
+   uvicorn app.main:app --reload --port 8002
    ```
 
 5. Quick checks
 
-- API heartbeat: `GET http://127.0.0.1:8001/health/`
-- DB connectivity: `GET http://127.0.0.1:8001/health/db`
+- API heartbeat: `GET http://127.0.0.1:8002/health/`
+- DB connectivity: `GET http://127.0.0.1:8002/health/db`
 
 ## Frontend (Next.js) Integration
 
 Backend base URL (local):
 
-- `http://127.0.0.1:8001`
+- `http://127.0.0.1:8002`
 
 Frontend must define the API base URL (example: `.env.local` in your Next.js project):
 
 ```env
-NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8001
+NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8002
 ```
 
 If this env var is missing, the frontend cannot send login/recommendation requests and will show an error.

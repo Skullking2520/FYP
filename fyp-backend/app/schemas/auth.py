@@ -1,18 +1,40 @@
 # auth.py
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, field_validator
 
 
 class RegisterRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str
     name: str | None = None
     age: int | None = None
     country: str | None = None
 
+    @field_validator("email")
+    @classmethod
+    def _validate_email_like(cls, v: str) -> str:
+        value = (v or "").strip()
+        if "@" not in value:
+            raise ValueError("email must contain '@'")
+        left, right = value.split("@", 1)
+        if not left or not right:
+            raise ValueError("email must have text before and after '@'")
+        return value
+
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str
+
+    @field_validator("email")
+    @classmethod
+    def _validate_email_like(cls, v: str) -> str:
+        value = (v or "").strip()
+        if "@" not in value:
+            raise ValueError("email must contain '@'")
+        left, right = value.split("@", 1)
+        if not left or not right:
+            raise ValueError("email must have text before and after '@'")
+        return value
 
 
 class AuthResponse(BaseModel):

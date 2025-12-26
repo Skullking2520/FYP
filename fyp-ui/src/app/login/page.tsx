@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
+import { getPostAuthRedirectPath } from "@/lib/resume";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -14,8 +15,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!loading && token) {
-      const done = typeof window === "undefined" ? null : window.localStorage.getItem("onboarding_completed_v1");
-      router.replace(done ? "/dashboard" : "/onboarding/steps/basic");
+      router.replace(getPostAuthRedirectPath());
     }
   }, [loading, token, router]);
 
@@ -26,8 +26,7 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       await login(email, password);
-      const done = typeof window === "undefined" ? null : window.localStorage.getItem("onboarding_completed_v1");
-      router.push(done ? "/dashboard" : "/onboarding/steps/basic");
+      router.push(getPostAuthRedirectPath());
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to sign in";
       setError(message);

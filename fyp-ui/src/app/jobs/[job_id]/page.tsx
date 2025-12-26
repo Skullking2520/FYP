@@ -155,7 +155,7 @@ export default function JobDetailPage({ params }: { params: Promise<Params> }) {
     const full = job?.description;
     if (typeof full === "string" && full.trim()) return full.trim();
 
-    return "No description available.";
+    return "No description available from the current backend for this job.";
   }, [job]);
 
   if (loading) {
@@ -204,6 +204,11 @@ export default function JobDetailPage({ params }: { params: Promise<Params> }) {
         <p className="mt-3 whitespace-pre-wrap text-sm text-slate-700">
           {description}
         </p>
+        {!job && (
+          <p className="mt-3 text-sm text-slate-600">
+            If you still see this message, the backend may not expose a job-detail endpoint. The related majors below can still load.
+          </p>
+        )}
       </section>
 
       <section className="rounded-2xl border bg-white p-6 shadow-sm">
@@ -213,7 +218,7 @@ export default function JobDetailPage({ params }: { params: Promise<Params> }) {
         </p>
 
         {skills.length === 0 ? (
-          <div className="mt-4 text-sm text-slate-500">No skills returned for this job.</div>
+          <div className="mt-4 text-sm text-slate-500">No skills returned for this job (or the endpoint is unavailable).</div>
         ) : (
           <ul className="mt-4 space-y-2">
             {skills.map((skill, idx) => {
@@ -236,14 +241,14 @@ export default function JobDetailPage({ params }: { params: Promise<Params> }) {
       </section>
 
       <section className="rounded-2xl border bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-900">Courses</h2>
-        <p className="mt-1 text-sm text-slate-600">Pick a course to see top matching programs.</p>
+        <h2 className="text-lg font-semibold text-slate-900">Majors</h2>
+        <p className="mt-1 text-sm text-slate-600">Pick a major to see top matching programs.</p>
 
-        {majorsLoading && <div className="mt-4 text-sm text-slate-500">Loading courses…</div>}
+        {majorsLoading && <div className="mt-4 text-sm text-slate-500">Loading majors…</div>}
         {majorsError && <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{majorsError}</div>}
 
         {!majorsLoading && !majorsError && majors.length === 0 && (
-          <div className="mt-4 text-sm text-slate-500">No courses returned for this job.</div>
+          <div className="mt-4 text-sm text-slate-500">No majors returned for this job.</div>
         )}
 
         {!majorsLoading && !majorsError && majors.length > 0 && (

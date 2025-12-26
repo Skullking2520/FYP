@@ -73,6 +73,55 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Any:
         if "from majors" in sql_l:
             return [{"major_name": major_name}]
 
+        if "from skill_resource_map" in sql_l:
+            # Minimal row shape to satisfy SkillResourceItem.
+            return [
+                {
+                    "resource_id": 10,
+                    "title": "Learn Python",
+                    "provider": "Test",
+                    "type": "course",
+                    "difficulty": "beginner",
+                    "estimated_hours": 10,
+                    "url": "https://example.com/python",
+                    "description": "Intro Python",
+                    "verification_status": "VERIFIED",
+                    "guidance_text": None,
+                    "priority": 1,
+                    "difficulty_level": 1.0,
+                }
+            ]
+
+        if "from skill" in sql_l:
+            # Support resolving numeric skill_id to skill_key/name.
+            return [
+                {
+                    "skill_key": "http://data.europa.eu/esco/skill/2ee670aa-c687-4ff7-92eb-0abc9b57e5f2",
+                    "name": "python",
+                }
+            ]
+
+        if "from job" in sql_l:
+            # Provide stable job rows for search endpoints.
+            return [
+                {
+                    "id": 1,
+                    "title": "Software Developer",
+                    "source": "ESCO",
+                    "esco_uri": "http://data.europa.eu/esco/occupation/00030d09-2b3a-4efd-87cc-c4ea39d27c34",
+                    "occupation_uid": "occ_1",
+                    "onet_soc_code": "15-1252.00",
+                },
+                {
+                    "id": 2,
+                    "title": "Data Analyst",
+                    "source": "ESCO",
+                    "esco_uri": "http://data.europa.eu/esco/occupation/11111111-2222-3333-4444-555555555555",
+                    "occupation_uid": "occ_2",
+                    "onet_soc_code": "15-2041.00",
+                },
+            ]
+
         return []
 
     monkeypatch.setattr(mysql_db, "query", fake_query)

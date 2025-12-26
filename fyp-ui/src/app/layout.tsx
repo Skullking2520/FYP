@@ -1,6 +1,7 @@
 import "./globals.css";
 import Providers from "@/components/ui/providers";
 import { Sidebar } from "@/components/sidebar";
+import { RouteTracker } from "@/components/route-tracker";
 
 export const metadata = {
   title: "CareerPath.AI",
@@ -12,6 +13,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body className="bg-slate-50 text-slate-900">
         <Providers>
+          <RouteTracker />
           <Sidebar />
           <main className="md:ml-64 min-h-screen">{children}</main>
         </Providers>

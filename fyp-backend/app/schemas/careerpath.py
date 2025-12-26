@@ -27,6 +27,29 @@ class JobDetail(BaseModel):
     job_zone: int | None = None
 
 
+class JobSearchItem(BaseModel):
+    job_id: int
+    title: str
+    job_ref: str
+    source: str | None = None
+    esco_uri: str | None = None
+    occupation_uid: str | None = None
+    onet_soc_code: str | None = None
+
+
+class LinkedMajor(BaseModel):
+    # major_id can be None when we only have a name (e.g., ML/ESCO mapping but major table lookup not available).
+    major_id: int | None = None
+    major_name: str
+    field: str | None = None
+    description: str | None = None
+
+
+class JobDetailWithMajor(BaseModel):
+    job: JobDetail
+    major: LinkedMajor | None = None
+
+
 class JobSkillItem(BaseModel):
     skill_id: int = Field(description="skill.id")
     skill_key: str
@@ -80,7 +103,32 @@ class MajorSkillItem(BaseModel):
 
 
 class MajorSkillGapsRequest(BaseModel):
-    skill_keys: list[str] = Field(max_length=200)
+    # Preferred: skill_keys
+    skill_keys: list[str] = Field(default_factory=list, max_length=200)
+    # Legacy/compat: some clients send `skills: string[]`
+    skills: list[str] = Field(default_factory=list, max_length=200)
+
+    @classmethod
+    def _clean_keys(cls, values: list[str]) -> list[str]:
+        out: list[str] = []
+        seen: set[str] = set()
+        for v in values or []:
+            key = (v or "").strip()
+            if not key:
+                continue
+            k = key.lower()
+            if k in seen:
+                continue
+            seen.add(k)
+            out.append(key)
+        return out
+
+    def model_post_init(self, __context):
+        # If the caller provided legacy `skills` but not `skill_keys`, map it across.
+        if not self.skill_keys and self.skills:
+            self.skill_keys = self._clean_keys(self.skills)
+        else:
+            self.skill_keys = self._clean_keys(self.skill_keys)
 
 
 class MajorProgramItem(BaseModel):

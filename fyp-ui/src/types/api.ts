@@ -76,6 +76,18 @@ export type BackendJobRecommendation = {
   score: number;
 };
 
+// 5) GET /api/jobs/search?q=...&top_k=...
+//    Response: [{ job_id, title, job_ref, esco_uri, occupation_uid, onet_soc_code, source }]
+export type BackendJobSearchResult = {
+  job_id: number | string;
+  title: string;
+  job_ref?: string | null;
+  esco_uri?: string | null;
+  occupation_uid?: string | null;
+  onet_soc_code?: string | null;
+  source?: string | null;
+};
+
 export type BackendJob = {
   job_id?: number | string;
   id?: number | string;
@@ -155,4 +167,31 @@ export type BackendSkillResource = {
   guidance_text?: string | null;
   priority?: number | null;
   difficulty_level?: number | null;
+};
+
+// --- Optional backend convenience endpoints ---
+// 1) GET /api/users/me/pathway-summary
+//    Response: { skills: [{skill_key,name,level}], desired_job?, recommended_major?, gaps? }
+
+export type BackendPathwaySummarySkill = {
+  skill_key: string;
+  name?: string | null;
+  level?: number | null;
+};
+
+export type BackendPathwaySummaryJob = {
+  job_id: number | string;
+  title?: string | null;
+};
+
+export type BackendPathwaySummaryMajor = {
+  major_id: number | string;
+  major_name?: string | null;
+};
+
+export type BackendPathwaySummary = {
+  skills: BackendPathwaySummarySkill[];
+  desired_job?: BackendPathwaySummaryJob | null;
+  recommended_major?: BackendPathwaySummaryMajor | null;
+  gaps?: BackendMajorSkill[];
 };
