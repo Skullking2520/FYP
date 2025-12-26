@@ -96,6 +96,14 @@ class Settings(BaseSettings):
     # - Comma-separated:   ADMIN_EMAILS=admin@example.com,ops@example.com
     admin_emails: list[str] = Field(default_factory=list, validation_alias="ADMIN_EMAILS")
 
+    # Admin access control (single email)
+    # Preferred by spec: ADMIN_EMAIL=admin@example.com
+    admin_email: str | None = Field(default=None, validation_alias="ADMIN_EMAIL")
+
+    # Backwards-compat / convenience: some deployments may set this
+    # (originally intended for frontend). We accept it server-side as fallback.
+    next_public_admin_email: str | None = Field(default=None, validation_alias="NEXT_PUBLIC_ADMIN_EMAIL")
+
     # If true, read ADMIN_EMAILS from the process environment on each check.
     # If false, values are loaded once at startup via pydantic-settings.
     admin_emails_reload: bool = Field(default=False, validation_alias="ADMIN_EMAILS_RELOAD")
@@ -159,8 +167,15 @@ def build_sqlalchemy_db_url(settings: Settings) -> str:
 def get_admin_allowlist(*, reload: bool | None = None) -> set[str]:
     do_reload = settings.admin_emails_reload if reload is None else reload
     if do_reload:
-        return set(_parse_admin_emails(os.environ.get("ADMIN_EMAILS")))
-    return set(_normalize_email(e) for e in (settings.admin_emails or []))
+        emails: set[str] = set(_parse_admin_emails(os.environ.get("ADMIN_EMAILS")))
+        emails.update(_parse_admin_emails(os.environ.get("ADMIN_EMAIL")))
+        emails.update(_parse_admin_emails(os.environ.get("NEXT_PUBLIC_ADMIN_EMAIL")))
+        return set(_normalize_email(e) for e in emails)
+
+    emails: set[str] = set(_normalize_email(e) for e in (settings.admin_emails or []))
+    emails.update(_parse_admin_emails(settings.admin_email))
+    emails.update(_parse_admin_emails(settings.next_public_admin_email))
+    return set(_normalize_email(e) for e in emails)
 
 
 def is_admin_email(email: str) -> bool:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import case, func
@@ -21,9 +22,23 @@ from app.schemas.reco_tracking import SkillRecoPickPoint
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
+logger = logging.getLogger(__name__)
+
 
 def _require_admin(current_user: User = Depends(get_current_user)) -> User:
     if not is_admin_email(current_user.email):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    return current_user
+
+
+def _require_admin_stats(current_user: User = Depends(get_current_user)) -> User:
+    email = (current_user.email or "").strip()
+    is_admin = is_admin_email(email)
+
+    # Diagnostic log (non-sensitive): email + boolean only.
+    logger.info("admin.stats email=%s is_admin=%s", email, is_admin)
+
+    if not is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
     return current_user
 
@@ -105,7 +120,7 @@ def _build_skill_reco_picks_series(db: Session, *, days: int = 14) -> list[Skill
 @router.get("/stats", response_model=AdminStatsResponse)
 def get_admin_stats(
     db: Session = Depends(get_db),
-    _admin: User = Depends(_require_admin),
+    _admin: User = Depends(_require_admin_stats),
 ) -> AdminStatsResponse:
     accounts_total = int(db.query(func.count(User.id)).scalar() or 0)
 
