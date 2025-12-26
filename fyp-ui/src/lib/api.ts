@@ -21,6 +21,34 @@ import { suggestJobsBySkills } from "./match";
 
 const LEGACY_API_PREFIX = "/api/legacy";
 
+async function apiFetchV2<T>(path: string, init: RequestInit = {}, token?: string | null): Promise<T> {
+  // /api/* is proxied to upstream /api/*
+  const url = `/api${path}`;
+  const headers = new Headers(init.headers);
+  if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+
+  const response = await fetch(url, {
+    ...init,
+    headers,
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    let message = `Request failed with status ${response.status}`;
+    try {
+      const errorBody = await response.json();
+      if (typeof errorBody?.detail === "string") message = errorBody.detail;
+    } catch {
+      // ignore
+    }
+    throw new Error(message);
+  }
+
+  if (response.status === 204) return undefined as T;
+  return (await response.json()) as T;
+}
+
 async function apiFetch<T>(path: string, init: RequestInit = {}, token?: string | null): Promise<T> {
   const url = `${LEGACY_API_PREFIX}${path}`;
   const headers = new Headers(init.headers);
@@ -70,7 +98,53 @@ export async function registerRequest(payload: RegisterPayload): Promise<RemoteU
 }
 
 export async function getProfile(token: string): Promise<RemoteUserProfile> {
-  return apiFetch<RemoteUserProfile>("/users/me", { method: "GET" }, token);
+  const normalizeAdmin = (profile: unknown): RemoteUserProfile => {
+    if (!profile || typeof profile !== "object") return profile as RemoteUserProfile;
+    const p0 = profile as Record<string, unknown>;
+    const wrappedUser = p0["user"];
+    const wrappedData = p0["data"];
+    const inner =
+      (wrappedUser && typeof wrappedUser === "object" ? (wrappedUser as Record<string, unknown>) : null) ??
+      (wrappedData && typeof wrappedData === "object" ? (wrappedData as Record<string, unknown>) : null);
+    const p: Record<string, unknown> = inner ? { ...p0, ...inner } : p0;
+
+    const toBool = (v: unknown): boolean => {
+      if (v === true) return true;
+      if (v === 1) return true;
+      if (typeof v === "string") {
+        const s = v.trim().toLowerCase();
+        return s === "true" || s === "1" || s === "yes";
+      }
+      return false;
+    };
+
+    const isAdminAlready = toBool(p["is_admin"]);
+    if (!isAdminAlready) {
+      const isAdminAlt =
+        toBool(p["is_admin_email"]) ||
+        toBool(p["isAdmin"]) ||
+        toBool(p["is_superuser"]) ||
+        toBool(p["isSuperuser"]) ||
+        toBool(p["is_staff"]) ||
+        (typeof p["role"] === "string" && (p["role"] as string).toLowerCase() === "admin") ||
+        (Array.isArray(p["roles"]) && (p["roles"] as unknown[]).some((r) => typeof r === "string" && r.toLowerCase() === "admin"));
+
+      if (isAdminAlt) {
+        p["is_admin"] = true;
+      }
+    }
+
+    return p as unknown as RemoteUserProfile;
+  };
+
+  // Prefer the newer /api/users/me (typically includes is_admin for allowlisted users).
+  try {
+    const profile = await apiFetchV2<unknown>("/users/me", { method: "GET" }, token);
+    return normalizeAdmin(profile);
+  } catch {
+    const profile = await apiFetch<unknown>("/users/me", { method: "GET" }, token);
+    return normalizeAdmin(profile);
+  }
 }
 
 export type ProfileUpdatePayload = {
@@ -82,14 +156,26 @@ export type ProfileUpdatePayload = {
 };
 
 export async function updateProfile(token: string, payload: ProfileUpdatePayload): Promise<RemoteUserProfile> {
-  return apiFetch<RemoteUserProfile>(
-    "/users/me",
-    {
-      method: "PUT",
-      body: JSON.stringify(payload),
-    },
-    token,
-  );
+  // Prefer /api/users/me (server contract), fallback to legacy.
+  try {
+    return await apiFetchV2<RemoteUserProfile>(
+      "/users/me",
+      {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      },
+      token,
+    );
+  } catch {
+    return apiFetch<RemoteUserProfile>(
+      "/users/me",
+      {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      },
+      token,
+    );
+  }
 }
 
 export async function extractSkills(user_text: string, token?: string | null): Promise<SkillExtractionResponse> {

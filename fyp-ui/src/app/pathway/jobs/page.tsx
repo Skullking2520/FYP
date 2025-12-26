@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { recommendJobs } from "@/lib/backend-api";
+import { extractSkillsFromText, recommendJobs, searchJobs, searchSkills } from "@/lib/backend-api";
+import { useAuth } from "@/components/auth-provider";
 import { clearSelectedMajor, loadSelectedJob, saveSelectedJob } from "@/lib/pathway-storage";
 import { expandSkillKeysWithLevels, loadSelectedSkillsFromStorage, SELECTED_SKILLS_STORAGE_KEY } from "@/lib/skills-storage";
 import type { BackendJobRecommendation } from "@/types/api";
@@ -17,6 +18,40 @@ function formatScore(score: unknown): string {
     return score;
   }
   return "N/A";
+}
+
+function normalizeTitle(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function matchJobByTitle(targetTitle: string, jobs: BackendJobRecommendation[]): BackendJobRecommendation | null {
+  const desired = normalizeTitle(targetTitle);
+  if (!desired) return null;
+  const list = Array.isArray(jobs) ? jobs : [];
+  return (
+    list.find((j) => normalizeTitle(j.title ?? "") === desired) ??
+    list.find((j) => {
+      const t = normalizeTitle(j.title ?? "");
+      return t.includes(desired) || desired.includes(t);
+    }) ??
+    null
+  );
+}
+
+function matchSearchResultByTitle(
+  targetTitle: string,
+  items: { title?: string | null }[],
+): { title?: string | null } | null {
+  const desired = normalizeTitle(targetTitle);
+  if (!desired) return null;
+  return (
+    items.find((j) => normalizeTitle(String(j.title ?? "")) === desired) ??
+    items.find((j) => {
+      const t = normalizeTitle(String(j.title ?? ""));
+      return t.includes(desired) || desired.includes(t);
+    }) ??
+    null
+  );
 }
 
 
@@ -39,6 +74,7 @@ function loadUserTypedTargetJob(): string | null {
 
 export default function PathwayJobsPage() {
   const router = useRouter();
+  const { token } = useAuth();
 
   const [skills, setSkills] = useState<SelectedSkill[]>(() => loadSelectedSkillsFromStorage());
   const [targetJob, setTargetJob] = useState<string | null>(() => (typeof window === "undefined" ? null : loadUserTypedTargetJob()));
@@ -51,6 +87,16 @@ export default function PathwayJobsPage() {
   const [jobs, setJobs] = useState<BackendJobRecommendation[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const storedSelectedJob = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    return loadSelectedJob();
+  }, [selectedJobId]);
+
+  const targetJobMatch = useMemo(() => {
+    if (!targetJob) return null;
+    return matchJobByTitle(targetJob, jobs);
+  }, [targetJob, jobs]);
 
   const onStorage = useCallback((event: StorageEvent) => {
     if (event.key === SELECTED_SKILLS_STORAGE_KEY) {
@@ -137,10 +183,100 @@ export default function PathwayJobsPage() {
                 Top match right now: <span className="font-semibold text-slate-900">{jobs[0]?.title}</span>
               </div>
             )}
+
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-xs text-slate-600">
+                Continue with your future job (we will match it to a job from the recommended list).
+              </div>
+              <button
+                className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                disabled={loading}
+                onClick={() => {
+                  setError(null);
+                  if (skills.length === 0) {
+                    setError("Please pick skills first so we can match your job.");
+                    return;
+                  }
+                  // Best-effort: if we already have a direct title match from the current recommendations, use it.
+                  if (targetJobMatch) {
+                    saveSelectedJob({ job_id: String(targetJobMatch.job_id), title: targetJobMatch.title });
+                    setSelectedJobId(String(targetJobMatch.job_id));
+                    router.push("/pathway/majors");
+                    return;
+                  }
+
+                  (async () => {
+                    try {
+                      // Preferred: resolve the typed title via backend search API.
+                      const search = await searchJobs(targetJob, 50);
+                      const found = matchSearchResultByTitle(targetJob, search) as any;
+                      if (found) {
+                        const jobRef = typeof found.job_ref === "string" && found.job_ref.trim() ? found.job_ref.trim() : null;
+                        const jobId = found.job_id;
+                        const idToStore = jobRef ?? (typeof jobId === "string" ? jobId : String(jobId));
+                        saveSelectedJob({ job_id: idToStore, title: targetJob });
+                        setSelectedJobId(idToStore);
+                        router.push("/pathway/majors");
+                        return;
+                      }
+
+                      // Resolve the typed job title by extracting related skills and re-running recommendation.
+                      const extracted = await extractSkillsFromText(targetJob, token);
+                      const names = Array.isArray(extracted?.skills)
+                        ? extracted.skills
+                            .map((s) => (typeof s?.skill_name === "string" ? s.skill_name.trim() : ""))
+                            .filter(Boolean)
+                            .slice(0, 10)
+                        : [];
+
+                      const resolvedSkillKeys: string[] = [];
+                      for (const name of names) {
+                        const hits = await searchSkills(name);
+                        const key = hits?.[0]?.skill_key;
+                        if (typeof key === "string" && key.trim()) {
+                          resolvedSkillKeys.push(key.trim());
+                        }
+                        if (resolvedSkillKeys.length >= 20) break;
+                      }
+
+                      const uniq = Array.from(new Set(resolvedSkillKeys));
+                      if (uniq.length === 0) {
+                        setError("We couldn't resolve your future job. Please select a job below.");
+                        return;
+                      }
+
+                      const recs = await recommendJobs(uniq);
+                      const matched = matchJobByTitle(targetJob, Array.isArray(recs) ? recs : []);
+                      const best = matched ?? (Array.isArray(recs) && recs.length > 0 ? recs[0] : null);
+                      if (!best) {
+                        // Last resort: if recommendations exist on the page, continue with top-1.
+                        const fallbackFromCurrent = jobs.length > 0 ? jobs[0] : null;
+                        if (fallbackFromCurrent) {
+                          saveSelectedJob({ job_id: String(fallbackFromCurrent.job_id), title: targetJob });
+                          setSelectedJobId(String(fallbackFromCurrent.job_id));
+                          router.push("/pathway/majors");
+                          return;
+                        }
+                        setError("We couldn't resolve your future job. Please select a job below.");
+                        return;
+                      }
+
+                      saveSelectedJob({ job_id: String(best.job_id), title: targetJob });
+                      setSelectedJobId(String(best.job_id));
+                      router.push("/pathway/majors");
+                    } catch {
+                      setError("We couldn't resolve your future job. Please select a job below.");
+                    }
+                  })();
+                }}
+              >
+                No thanks, I’ll stick with this job
+              </button>
+            </div>
           </div>
         )}
 
-        {selectedJobId && (
+        {!targetJob && selectedJobId && (
           <div className="mt-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div className="text-sm text-slate-700">
               Already selected: <span className="font-semibold text-slate-900">{selectedJobTitle ?? selectedJobId}</span>
@@ -148,12 +284,21 @@ export default function PathwayJobsPage() {
             <button
               className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
               onClick={() => {
+                setError(null);
+                // Re-affirm the previous selection and continue.
+                if (storedSelectedJob?.job_id) {
+                  saveSelectedJob({ job_id: String(storedSelectedJob.job_id), title: storedSelectedJob.title });
+                }
                 router.push("/pathway/majors");
               }}
             >
               No thanks, I’ll stick with this job
             </button>
           </div>
+        )}
+
+        {error && (
+          <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{error}</div>
         )}
       </header>
 

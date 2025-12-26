@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { registerRequest } from "@/lib/api";
+import { getPostAuthRedirectPath } from "@/lib/resume";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -20,8 +21,7 @@ export default function RegisterPage() {
 
   useEffect(() => {
     if (!loading && token) {
-      const done = typeof window === "undefined" ? null : window.localStorage.getItem("onboarding_completed_v1");
-      router.replace(done ? "/dashboard" : "/onboarding/steps/basic");
+      router.replace(getPostAuthRedirectPath());
     }
   }, [loading, token, router]);
 
@@ -42,8 +42,7 @@ export default function RegisterPage() {
         name: form.name || undefined,
       });
       await login(form.email, form.password);
-      const done = typeof window === "undefined" ? null : window.localStorage.getItem("onboarding_completed_v1");
-      router.push(done ? "/dashboard" : "/onboarding/steps/basic");
+      router.push(getPostAuthRedirectPath());
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to create account";
       setError(message);

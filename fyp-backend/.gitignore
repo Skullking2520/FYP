@@ -11,6 +11,11 @@ venv/
 .pytest_cache/
 .mypy_cache/
 
+# Local DB files (do not commit)
+*.db
+*.sqlite
+*.sqlite3
+
 # Large local model weights (do not commit)
 app/nlp/Llama-3.2-1B-Instruct/
 

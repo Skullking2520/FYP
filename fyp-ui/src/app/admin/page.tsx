@@ -48,7 +48,7 @@ function SkillRecoPickChart({ series }: { series: AdminSkillRecoPickPoint[] | un
   if (normalized.length === 0) {
     return (
       <div className="text-sm text-muted-foreground">
-        아직 데이터가 없습니다. (백엔드에서 추천-선택 이벤트 로그/집계 API가 추가되면 표시됩니다.)
+        No data yet. (This appears once the backend exposes a recommendation→selection event aggregation API.)
       </div>
     );
   }
@@ -57,23 +57,23 @@ function SkillRecoPickChart({ series }: { series: AdminSkillRecoPickPoint[] | un
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="rounded-xl border bg-background p-3">
-          <div className="text-xs text-muted-foreground">최근 일자</div>
+          <div className="text-xs text-muted-foreground">Latest date</div>
           <div className="text-sm font-semibold text-foreground">{latest?.date ?? "—"}</div>
         </div>
         <div className="rounded-xl border bg-background p-3">
-          <div className="text-xs text-muted-foreground">Top-1 선택률</div>
+          <div className="text-xs text-muted-foreground">Top-1 pick rate</div>
           <div className="text-sm font-semibold text-foreground">{formatPercent(top1Rate)}</div>
         </div>
         <div className="rounded-xl border bg-background p-3">
-          <div className="text-xs text-muted-foreground">Top-5 내 선택률</div>
+          <div className="text-xs text-muted-foreground">Picked within Top-5</div>
           <div className="text-sm font-semibold text-foreground">{formatPercent(top5Rate)}</div>
         </div>
       </div>
 
       <div className="rounded-xl border bg-background p-4">
         <div className="flex items-center justify-between">
-          <div className="text-sm font-medium text-foreground">일자별 선택 횟수</div>
-          <div className="text-xs text-muted-foreground">최근 {normalized.length}일</div>
+          <div className="text-sm font-medium text-foreground">Daily picks</div>
+          <div className="text-xs text-muted-foreground">Last {normalized.length} days</div>
         </div>
 
         <div className="mt-4 grid grid-cols-14 items-end gap-2">
@@ -94,9 +94,7 @@ function SkillRecoPickChart({ series }: { series: AdminSkillRecoPickPoint[] | un
           })}
         </div>
 
-        <div className="mt-3 text-xs text-muted-foreground">
-          정의: 사용자가 스킬 기반 추천 리스트에서 실제로 선택한 직업 횟수 (정확도 대신 ‘선택 기반 적합도’ 지표)
-        </div>
+        <div className="mt-3 text-xs text-muted-foreground">Definition: actual user picks from skill-based recommendations.</div>
       </div>
     </div>
   );
@@ -109,7 +107,7 @@ function TopList({ items }: { items: AdminTopItem[] | undefined }) {
   }, [items]);
 
   if (!items || items.length === 0) {
-    return <div className="text-sm text-muted-foreground">데이터가 없습니다.</div>;
+    return <div className="text-sm text-muted-foreground">No data.</div>;
   }
 
   return (
@@ -140,7 +138,7 @@ function BucketList({ items }: { items: AdminStats["match_score_buckets"] }) {
   }, [items]);
 
   if (!items || items.length === 0) {
-    return <div className="text-sm text-muted-foreground">데이터가 없습니다.</div>;
+    return <div className="text-sm text-muted-foreground">No data.</div>;
   }
 
   return (
@@ -221,35 +219,15 @@ export default function AdminPage() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Admin Console</h1>
-          <p className="text-sm text-muted-foreground">어드민 전용 통계/카탈로그 관리 화면입니다.</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Link
-            href="/admin/programs"
-            className="rounded-xl border bg-background px-4 py-2 text-sm font-semibold text-foreground"
-          >
-            Programs
-          </Link>
-          <Link
-            href="/admin/universities"
-            className="rounded-xl border bg-background px-4 py-2 text-sm font-semibold text-foreground"
-          >
-            Universities
-          </Link>
-          <Link
-            href="/admin/create-admin"
-            className="rounded-xl border bg-background px-4 py-2 text-sm font-semibold text-foreground"
-          >
-            Create admin
-          </Link>
+          <p className="text-sm text-muted-foreground">Admin-only analytics dashboard.</p>
         </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader>
-            <CardTitle>계정 수</CardTitle>
-            <CardDescription>전체 등록 계정</CardDescription>
+            <CardTitle>Total accounts</CardTitle>
+            <CardDescription>Registered users</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-semibold">{statsLoading ? "…" : formatNumber(stats?.accounts_total)}</div>
@@ -258,8 +236,8 @@ export default function AdminPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>프로필 작성</CardTitle>
-            <CardDescription>프로필 정보 보유 계정</CardDescription>
+            <CardTitle>Profiles completed</CardTitle>
+            <CardDescription>Users with a profile</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-semibold">{statsLoading ? "…" : formatNumber(stats?.accounts_with_profile)}</div>
@@ -268,8 +246,8 @@ export default function AdminPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>직업 선택</CardTitle>
-            <CardDescription>선택/저장된 직업 합계</CardDescription>
+            <CardTitle>Job selections</CardTitle>
+            <CardDescription>Total selected/saved jobs</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-semibold">{statsLoading ? "…" : formatNumber(stats?.job_selections_total)}</div>
@@ -278,8 +256,8 @@ export default function AdminPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>스킬 매칭</CardTitle>
-            <CardDescription>평균 매칭 점수(0~1)</CardDescription>
+            <CardTitle>Skill match</CardTitle>
+            <CardDescription>Average match score (0–1)</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-semibold">
@@ -296,9 +274,9 @@ export default function AdminPage() {
       {statsError && (
         <Card>
           <CardHeader>
-            <CardTitle>통계 로딩 실패</CardTitle>
+            <CardTitle>Failed to load stats</CardTitle>
             <CardDescription>
-              현재 UI는 `GET /admin/stats`(Bearer 토큰 필요) 응답을 기대합니다.
+              This UI expects a backend admin stats endpoint (Bearer token required).
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -310,12 +288,12 @@ export default function AdminPage() {
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-3">
           <CardHeader>
-            <CardTitle>스킬 기반 추천 선택</CardTitle>
-            <CardDescription>추천된 직업 중 사용자가 실제로 고른 횟수/비율(품질 지표)</CardDescription>
+            <CardTitle>Skill-based recommendation picks</CardTitle>
+            <CardDescription>User picks from skill-based recommended jobs</CardDescription>
           </CardHeader>
           <CardContent>
             {statsLoading ? (
-              <div className="text-sm text-muted-foreground">불러오는 중…</div>
+              <div className="text-sm text-muted-foreground">Loading…</div>
             ) : (
               <SkillRecoPickChart series={stats?.skill_reco_picks_series} />
             )}
@@ -324,32 +302,32 @@ export default function AdminPage() {
 
         <Card className="lg:col-span-1">
           <CardHeader>
-            <CardTitle>Top 직업</CardTitle>
-            <CardDescription>계정들이 선택한 직업 TOP</CardDescription>
+            <CardTitle>Top jobs</CardTitle>
+            <CardDescription>Most selected jobs</CardDescription>
           </CardHeader>
           <CardContent>
-            {statsLoading ? <div className="text-sm text-muted-foreground">불러오는 중…</div> : <TopList items={stats?.top_jobs} />}
+            {statsLoading ? <div className="text-sm text-muted-foreground">Loading…</div> : <TopList items={stats?.top_jobs} />}
           </CardContent>
         </Card>
 
         <Card className="lg:col-span-1">
           <CardHeader>
-            <CardTitle>Top 스킬</CardTitle>
-            <CardDescription>사용자 입력/추출 스킬 TOP</CardDescription>
+            <CardTitle>Top skills</CardTitle>
+            <CardDescription>Most common user skills</CardDescription>
           </CardHeader>
           <CardContent>
-            {statsLoading ? <div className="text-sm text-muted-foreground">불러오는 중…</div> : <TopList items={stats?.top_skills} />}
+            {statsLoading ? <div className="text-sm text-muted-foreground">Loading…</div> : <TopList items={stats?.top_skills} />}
           </CardContent>
         </Card>
 
         <Card className="lg:col-span-1">
           <CardHeader>
-            <CardTitle>매칭 분포</CardTitle>
-            <CardDescription>점수 구간별 분포</CardDescription>
+            <CardTitle>Match distribution</CardTitle>
+            <CardDescription>Distribution by score bucket</CardDescription>
           </CardHeader>
           <CardContent>
             {statsLoading ? (
-              <div className="text-sm text-muted-foreground">불러오는 중…</div>
+              <div className="text-sm text-muted-foreground">Loading…</div>
             ) : (
               <BucketList items={stats?.match_score_buckets} />
             )}

@@ -20,6 +20,7 @@ from app.api.routes.health import router as health_router
 from app.api.routes.legacy_recommend import router as legacy_recommend_router
 from app.api.routes.majors import router as majors_router
 from app.api.routes.recommend import router as ml_recommend_router
+from app.api.routes.user_pathway import router as api_user_pathway_router
 from app.routers.admin import router as admin_router
 from app.routers import auth, recommend, recommendations, users
 from app.routers.selected_job import router as selected_job_router
@@ -68,6 +69,7 @@ def create_app() -> FastAPI:
     application.include_router(majors_router, prefix=settings.api_prefix)
     application.include_router(ml_recommend_router, prefix=settings.api_prefix)
     application.include_router(legacy_recommend_router, prefix=settings.api_prefix)
+    application.include_router(api_user_pathway_router, prefix=settings.api_prefix)
 
     # Avoid accidental schema changes in shared MySQL databases.
     # For local/test sqlite usage, auto-create ORM tables is still convenient.

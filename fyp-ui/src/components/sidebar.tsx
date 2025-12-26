@@ -3,22 +3,32 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
-import { isAdminUser } from "@/lib/admin";
+import { isAdminUser, isAdminUserEmail } from "@/lib/admin";
+import { getDashboardEntryPath, getRecommendationEntryPath } from "@/lib/resume";
 
 export function Sidebar() {
   const router = useRouter();
   const { user, logout } = useAuth();
-  const isAdmin = isAdminUser(user);
+  const persistedEmail = typeof window === "undefined" ? null : window.localStorage.getItem("careerpath_login_email");
+  const isAdmin = isAdminUser(user) || isAdminUserEmail(persistedEmail);
 
   return (
     <aside className="hidden md:flex fixed left-0 top-0 h-screen w-64 border-r bg-white p-4 flex-col">
       <nav className="space-y-2 text-sm">
-        <Link className="block" href="/dashboard">
+        <button
+          type="button"
+          className="block w-full text-left"
+          onClick={() => router.push(getDashboardEntryPath())}
+        >
           Dashboard
-        </Link>
-        <Link className="block" href="/recommendations">
+        </button>
+        <button
+          type="button"
+          className="block w-full text-left"
+          onClick={() => router.push(getRecommendationEntryPath())}
+        >
           Recommendations
-        </Link>
+        </button>
         <Link className="block" href="/profile">
           Profile
         </Link>

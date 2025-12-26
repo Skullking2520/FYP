@@ -16,7 +16,10 @@ from app.models.recommendation_pick import RecommendationPick
 from app.schemas.careerpath import (
     DBStats,
     JobDetail,
+    JobDetailWithMajor,
+    JobSearchItem,
     JobSkillItem,
+    LinkedMajor,
     SkillResourceItem,
     RecommendJobItem,
     RecommendJobsRequest,
@@ -120,13 +123,84 @@ def search_skills(q: str = Query(default="", min_length=0)) -> list[SkillSearchI
             ) from exc2
 
 
-@router.get("/skills/{skill_key}/resources", response_model=list[SkillResourceItem])
-def get_skill_resources(skill_key: str, top_k: int = Query(default=10, ge=1, le=50)) -> list[SkillResourceItem]:
-    """Return learning resources for a given skill_key.
+@router.get("/jobs/search", response_model=list[JobSearchItem])
+def search_jobs(
+    q: str | None = Query(default=None, min_length=0),
+    name: str | None = Query(default=None, min_length=0),
+    top_k: int = Query(default=20, ge=1, le=50),
+) -> list[JobSearchItem]:
+    term = ((q or name) or "").strip()
+    if not term:
+        return []
 
-    Uses `skill_resource_map` as the canonical source (source='CANONICAL_1perSkill'):
-    - VERIFIED rows: resource_id present, may join to `skill_resource` for extra fields.
-    - CONCEPTUAL_ONLY rows: resource_id NULL; return `guidance_text` for UI fallback.
+    sql = """
+    SELECT
+      id,
+      title,
+      source,
+      esco_uri,
+      occupation_uid,
+      onet_soc_code
+    FROM job
+    WHERE title LIKE CONCAT('%', :q, '%')
+       OR occupation_uid LIKE CONCAT('%', :q, '%')
+       OR onet_soc_code LIKE CONCAT('%', :q, '%')
+    ORDER BY
+      CASE WHEN title LIKE CONCAT(:q, '%') THEN 0 ELSE 1 END,
+      title ASC,
+      id ASC
+    LIMIT :top_k;
+    """.strip()
+
+    try:
+        # Use module reference so unit tests can monkeypatch `app.db.mysql.query`.
+        from app.db import mysql as mysql_db
+
+        rows = mysql_db.query(sql, {"q": term, "top_k": int(top_k)})
+        out: list[JobSearchItem] = []
+        for row in rows:
+            job_id = int(row.get("id") or 0)
+            title = (row.get("title") or "").strip()
+            if not job_id or not title:
+                continue
+
+            esco_uri = row.get("esco_uri")
+            occupation_uid = row.get("occupation_uid")
+            onet_soc_code = row.get("onet_soc_code")
+            job_ref = (esco_uri or occupation_uid or onet_soc_code or str(job_id) or "").strip()
+
+            out.append(
+                JobSearchItem.model_validate(
+                    {
+                        "job_id": job_id,
+                        "title": title,
+                        "job_ref": job_ref,
+                        "source": row.get("source"),
+                        "esco_uri": esco_uri,
+                        "occupation_uid": occupation_uid,
+                        "onet_soc_code": onet_soc_code,
+                    }
+                )
+            )
+
+        return out
+    except DatabaseConnectionError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except DatabaseQueryError:
+        # Keep UI stable if the optional MySQL dataset isn't available.
+        return []
+
+
+@router.get("/skills/{skill_ref:path}/resources", response_model=list[SkillResourceItem])
+def get_skill_resources(skill_ref: str, top_k: int = Query(default=10, ge=1, le=50)) -> list[SkillResourceItem]:
+    """Return learning resources for a skill.
+
+    Frontend passes either:
+    - numeric `skill_id` (from gaps response), OR
+    - `skill_key` (often ESCO URI) which may include slashes.
+
+    Canonical source: MySQL `skill_resource_map` (source='CANONICAL_1perSkill').
+    Best-effort fallback: ORM `dataset_skill_resources` by skill name.
     """
 
     sql = """
@@ -155,8 +229,82 @@ def get_skill_resources(skill_key: str, top_k: int = Query(default=10, ge=1, le=
     """
 
     try:
-        rows = query(sql, {"skill_key": skill_key, "top_k": int(top_k)})
-        return [SkillResourceItem.model_validate(r) for r in rows]
+        from app.db import mysql as mysql_db
+
+        ref = unquote((skill_ref or "").strip())
+        if not ref:
+            return []
+
+        resolved_skill_key: str | None = None
+        resolved_skill_name: str | None = None
+
+        if ref.isdigit():
+            skill_id = int(ref)
+            # Resolve id -> skill_key (+ name for ORM fallback)
+            rows = mysql_db.query(
+                """
+                SELECT skill_key, name
+                FROM skill
+                WHERE id = :skill_id
+                LIMIT 1;
+                """.strip(),
+                {"skill_id": skill_id},
+            )
+            if rows:
+                resolved_skill_key = (rows[0].get("skill_key") or "").strip() or None
+                resolved_skill_name = (rows[0].get("name") or "").strip() or None
+        else:
+            resolved_skill_key = ref
+
+        if not resolved_skill_key:
+            return []
+
+        rows = mysql_db.query(sql, {"skill_key": resolved_skill_key, "top_k": int(top_k)})
+        if rows:
+            return [SkillResourceItem.model_validate(r) for r in rows]
+
+        # Optional fallback: some datasets may store mapping by skill_id instead of skill_key.
+        if ref.isdigit():
+            alt_sql = sql.replace("WHERE m.skill_key = :skill_key", "WHERE m.skill_id = :skill_id")
+            try:
+                alt_rows = mysql_db.query(alt_sql, {"skill_id": int(ref), "top_k": int(top_k)})
+                if alt_rows:
+                    return [SkillResourceItem.model_validate(r) for r in alt_rows]
+            except DatabaseQueryError:
+                pass
+
+        # Best-effort ORM fallback: match by skill name to `dataset_skill_resources`.
+        if resolved_skill_name:
+            try:
+                from app.database import SessionLocal
+                from app.models.dataset_skill_resource import DatasetSkillResource
+
+                with SessionLocal() as db:
+                    orm_rows = (
+                        db.query(DatasetSkillResource)
+                        .filter(DatasetSkillResource.skill.ilike(resolved_skill_name))
+                        .limit(int(top_k))
+                        .all()
+                    )
+                return [
+                    SkillResourceItem.model_validate(
+                        {
+                            "resource_id": None,
+                            "title": r.title,
+                            "provider": "",
+                            "type": "",
+                            "difficulty": "",
+                            "estimated_hours": None,
+                            "url": r.url,
+                            "description": None,
+                        }
+                    )
+                    for r in orm_rows
+                ]
+            except Exception:
+                return []
+
+        return []
     except (DatabaseConnectionError, DatabaseQueryError):
         # Do not break UI flow if this optional dataset isn't available.
         return []
@@ -220,6 +368,94 @@ def get_job(job_id: str, request: Request) -> JobDetail:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except DatabaseQueryError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Job detail query failed") from exc
+
+
+@router.get("/jobs/{job_id:path}/detail", response_model=JobDetailWithMajor)
+def get_job_detail_with_major(job_id: str, request: Request) -> JobDetailWithMajor:
+    """Job view-detail payload: job description + the linked major (1:1).
+
+    Major resolution order:
+    1) If job is (or resolves to) an ESCO occupation URI, use startup-cached ML metadata mapping
+       (occ_uri -> major names) and pick the first.
+    2) If DB has an explicit major_occupation_map row for the ESCO URI, use that.
+    3) If we only have a major name, try to look it up in `major` table to obtain major_id.
+
+    Returns `major=None` if no mapping is available.
+    """
+
+    job = get_job(job_id, request)
+
+    occ_ref = (job.esco_uri or unquote((job_id or "").strip()) or "").strip()
+    major_name: str | None = None
+
+    # 1) Canonical: DB mapping via job.esco_uri -> major_occupation_map.
+    if job.esco_uri:
+        try:
+            row = query_one(
+                """
+                SELECT m.id AS major_id, m.major_name, m.field, m.description
+                FROM major_occupation_map mom
+                JOIN major m ON m.id = mom.major_id
+                WHERE mom.occupation_uri = :occ_uri
+                ORDER BY mom.id ASC
+                LIMIT 1;
+                """.strip(),
+                {"occ_uri": job.esco_uri},
+            )
+            if row and row.get("major_name"):
+                return JobDetailWithMajor(
+                    job=job,
+                    major=LinkedMajor(
+                        major_id=int(row.get("major_id")) if row.get("major_id") is not None else None,
+                        major_name=(row.get("major_name") or "").strip(),
+                        field=row.get("field"),
+                        description=row.get("description"),
+                    ),
+                )
+        except (DatabaseConnectionError, DatabaseQueryError):
+            # Keep the UI stable even if mapping tables aren't accessible.
+            pass
+
+    # 2) Fallback: ML metadata mapping for ESCO URIs.
+    if major_name is None and occ_ref and _OCC_URI_RE.match(occ_ref):
+        assets = getattr(request.app.state, "ml_assets", None)
+        try:
+            majors = (assets.occ_uri_to_majors.get(occ_ref) if assets is not None else None)  # type: ignore[attr-defined]
+        except Exception:
+            majors = None
+        if isinstance(majors, list) and majors:
+            candidate = (majors[0] or "").strip()
+            if candidate:
+                major_name = candidate
+
+    # 3) If we have a major name, try to resolve it to an ID in the major table.
+    if major_name:
+        try:
+            row = query_one(
+                """
+                SELECT id AS major_id, major_name, field, description
+                FROM major
+                WHERE major_name = :major_name
+                LIMIT 1;
+                """.strip(),
+                {"major_name": major_name},
+            )
+        except (DatabaseConnectionError, DatabaseQueryError):
+            row = None
+
+        if row:
+            major = LinkedMajor(
+                major_id=int(row.get("major_id")) if row.get("major_id") is not None else None,
+                major_name=(row.get("major_name") or major_name).strip(),
+                field=row.get("field"),
+                description=row.get("description"),
+            )
+        else:
+            major = LinkedMajor(major_id=None, major_name=major_name)
+
+        return JobDetailWithMajor(job=job, major=major)
+
+    return JobDetailWithMajor(job=job, major=None)
 
 
 @router.get("/jobs/{job_id}/skills", response_model=list[JobSkillItem])
