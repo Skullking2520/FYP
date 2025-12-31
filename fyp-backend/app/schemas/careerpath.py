@@ -164,3 +164,17 @@ class SkillResourceItem(BaseModel):
     guidance_text: str | None = None
     priority: int | None = None
     difficulty_level: float | None = None
+
+
+class SkillResolveItem(BaseModel):
+    skill_key: str
+    skill_name: str | None = None
+    resolved: bool
+
+
+class SkillResolveRequest(BaseModel):
+    skill_keys: list[str] = Field(default_factory=list, max_length=500)
+
+
+class SkillResolveResponse(BaseModel):
+    items: list[SkillResolveItem]
