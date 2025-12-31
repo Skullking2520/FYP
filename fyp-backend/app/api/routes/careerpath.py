@@ -21,6 +21,9 @@ from app.schemas.careerpath import (
     JobSkillItem,
     LinkedMajor,
     SkillResourceItem,
+    SkillResolveItem,
+    SkillResolveRequest,
+    SkillResolveResponse,
     RecommendJobItem,
     RecommendJobsRequest,
     SkillSearchItem,
@@ -308,6 +311,121 @@ def get_skill_resources(skill_ref: str, top_k: int = Query(default=10, ge=1, le=
     except (DatabaseConnectionError, DatabaseQueryError):
         # Do not break UI flow if this optional dataset isn't available.
         return []
+
+
+@router.get("/skills/resolve", response_model=SkillResolveItem)
+def resolve_skill_name(skill_key: str = Query(min_length=1)) -> SkillResolveItem:
+    """Resolve a single skill_key to a display name.
+
+    - Always returns 200.
+    - If not resolvable, returns {resolved:false, skill_name:null}.
+
+    Accepts both:
+    - numeric skill id (string of digits)
+    - ESCO URI skill_key
+    """
+
+    ref = unquote((skill_key or "").strip())
+    if not ref:
+        return SkillResolveItem(skill_key=skill_key, skill_name=None, resolved=False)
+
+    try:
+        if ref.isdigit():
+            row = query_one(
+                """
+                SELECT name
+                FROM skill
+                WHERE id = :skill_id
+                LIMIT 1;
+                """.strip(),
+                {"skill_id": int(ref)},
+            )
+            name = (row or {}).get("name")
+        else:
+            row = query_one(
+                """
+                SELECT name
+                FROM skill
+                WHERE skill_key = :skill_key
+                LIMIT 1;
+                """.strip(),
+                {"skill_key": ref},
+            )
+            name = (row or {}).get("name")
+
+        skill_name = (str(name).strip() if name is not None else "") or None
+        return SkillResolveItem(skill_key=ref, skill_name=skill_name, resolved=bool(skill_name))
+    except (DatabaseConnectionError, DatabaseQueryError):
+        return SkillResolveItem(skill_key=ref, skill_name=None, resolved=False)
+
+
+@router.post("/skills/resolve", response_model=SkillResolveResponse)
+def resolve_skill_names(request: SkillResolveRequest) -> SkillResolveResponse:
+    """Resolve multiple skill_keys to display names.
+
+    Response order matches request order.
+    """
+
+    raw_keys = request.skill_keys or []
+    cleaned: list[str] = [unquote((k or "").strip()) for k in raw_keys]
+
+    # Short-circuit empty request.
+    if not cleaned:
+        return SkillResolveResponse(items=[])
+
+    numeric_ids: list[int] = []
+    key_strings: list[str] = []
+    for k in cleaned:
+        if not k:
+            continue
+        if k.isdigit():
+            numeric_ids.append(int(k))
+        else:
+            key_strings.append(k)
+
+    name_by_input: dict[str, str] = {}
+    try:
+        if numeric_ids:
+            sql = """
+            SELECT id, name
+            FROM skill
+            WHERE id IN (:skill_ids)
+            """.strip()
+            sql, params = expand_in_clause(sql, {"skill_ids": numeric_ids}, "skill_ids")
+            rows = query(sql, params)
+            for r in rows:
+                sid = r.get("id")
+                name = (r.get("name") or "").strip()
+                if sid is None or not name:
+                    continue
+                name_by_input[str(int(sid))] = name
+
+        if key_strings:
+            sql = """
+            SELECT skill_key, name
+            FROM skill
+            WHERE skill_key IN (:skill_keys)
+            """.strip()
+            sql, params = expand_in_clause(sql, {"skill_keys": key_strings}, "skill_keys")
+            rows = query(sql, params)
+            for r in rows:
+                k = (r.get("skill_key") or "").strip()
+                name = (r.get("name") or "").strip()
+                if not k or not name:
+                    continue
+                name_by_input[k] = name
+    except (DatabaseConnectionError, DatabaseQueryError):
+        name_by_input = {}
+
+    items: list[SkillResolveItem] = []
+    for k in cleaned:
+        if not k:
+            items.append(SkillResolveItem(skill_key=k, skill_name=None, resolved=False))
+            continue
+        name = name_by_input.get(k)
+        items.append(SkillResolveItem(skill_key=k, skill_name=name, resolved=bool(name)))
+
+    return SkillResolveResponse(items=items)
 
 
 @router.get("/jobs/{job_id}", response_model=JobDetail)
