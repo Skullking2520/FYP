@@ -301,20 +301,50 @@ def resolve_skill_labels(
         text = (label or "").strip()
         if not text:
             continue
-        match = process.extractOne(
-            text,
-            assets.skills_aliases,
-            scorer=fuzz.token_set_ratio,
-            processor=str.lower,
-        )
-        if not match:
-            continue
-        matched_label, score, idx = match
-        if score < threshold:
-            continue
+        text_lc = text.lower()
+        text_tokens = [t for t in re.split(r"\s+", text_lc) if t]
 
-        key = str(matched_label).lower()
-        concept_uri = assets.skills_alias_to_uri.get(key)
+        # Prefer exact alias match to avoid over-specific resolutions.
+        concept_uri = assets.skills_alias_to_uri.get(text_lc)
+        matched_label: str | None = None
+        score: int | None = None
+
+        if concept_uri:
+            matched_label = text
+            score = 100
+        else:
+            # Avoid over-specific matches for very short inputs.
+            # Example: token_set_ratio("chemistry", "water chemistry analysis") can be 100.
+            # For single-token inputs, we require a much stricter character-level match.
+            scorer = fuzz.ratio if len(text_tokens) <= 1 else fuzz.token_set_ratio
+
+            matches = process.extract(
+                text,
+                assets.skills_aliases,
+                scorer=scorer,
+                processor=str.lower,
+                limit=10,
+            )
+            if not matches:
+                continue
+
+            best_score = int(matches[0][1])
+            if best_score < threshold:
+                continue
+
+            best_labels = [m[0] for m in matches if int(m[1]) == best_score]
+            # If multiple candidates tie, prefer the one that adds the fewest extra tokens
+            # beyond the input phrase, then shortest.
+            def _tie_key(s: str) -> tuple[int, int, int]:
+                s_lc = s.lower()
+                s_tokens = [t for t in re.split(r"\s+", s_lc) if t]
+                extra = max(0, len(s_tokens) - len(text_tokens))
+                return (extra, len(s_tokens), len(s_lc))
+
+            chosen = min((str(s) for s in best_labels), key=_tie_key)
+            matched_label = chosen
+            score = best_score
+            concept_uri = assets.skills_alias_to_uri.get(chosen.lower())
         if not concept_uri:
             continue
         # Enforce UUID URIs only.
@@ -323,9 +353,9 @@ def resolve_skill_labels(
         resolved.append(
             ResolvedSkill(
                 input=text,
-                matchedLabel=str(matched_label),
+                matchedLabel=str(matched_label or ""),
                 conceptUri=concept_uri,
-                score=int(score),
+                score=int(score or 0),
             )
         )
     return resolved
