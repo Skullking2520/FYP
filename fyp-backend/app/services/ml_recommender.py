@@ -302,7 +302,6 @@ def resolve_skill_labels(
         if not text:
             continue
         text_lc = text.lower()
-        text_tokens = [t for t in re.split(r"\s+", text_lc) if t]
 
         # Prefer exact alias match to avoid over-specific resolutions.
         concept_uri = assets.skills_alias_to_uri.get(text_lc)
@@ -313,15 +312,13 @@ def resolve_skill_labels(
             matched_label = text
             score = 100
         else:
-            # Avoid over-specific matches for very short inputs.
-            # Example: token_set_ratio("chemistry", "water chemistry analysis") can be 100.
-            # For single-token inputs, we require a much stricter character-level match.
-            scorer = fuzz.ratio if len(text_tokens) <= 1 else fuzz.token_set_ratio
-
+            # token_set_ratio returns 100 when the input tokens are a subset of the
+            # candidate (e.g., "chemistry" vs "water chemistry analysis"). In that
+            # case, we prefer the shortest candidate to keep the match generic.
             matches = process.extract(
                 text,
                 assets.skills_aliases,
-                scorer=scorer,
+                scorer=fuzz.token_set_ratio,
                 processor=str.lower,
                 limit=10,
             )
@@ -333,15 +330,10 @@ def resolve_skill_labels(
                 continue
 
             best_labels = [m[0] for m in matches if int(m[1]) == best_score]
-            # If multiple candidates tie, prefer the one that adds the fewest extra tokens
-            # beyond the input phrase, then shortest.
-            def _tie_key(s: str) -> tuple[int, int, int]:
-                s_lc = s.lower()
-                s_tokens = [t for t in re.split(r"\s+", s_lc) if t]
-                extra = max(0, len(s_tokens) - len(text_tokens))
-                return (extra, len(s_tokens), len(s_lc))
-
-            chosen = min((str(s) for s in best_labels), key=_tie_key)
+            chosen = min(
+                (str(s) for s in best_labels),
+                key=lambda s: (len(s.split()), len(s)),
+            )
             matched_label = chosen
             score = best_score
             concept_uri = assets.skills_alias_to_uri.get(chosen.lower())
