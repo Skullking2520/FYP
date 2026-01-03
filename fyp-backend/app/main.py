@@ -60,7 +60,9 @@ def create_app() -> FastAPI:
 
     application.include_router(auth.router, prefix="/auth", tags=["auth"])
     application.include_router(users.router, prefix="/users", tags=["users"])
+    # Support both legacy (no API prefix) and newer (API-prefixed) clients.
     application.include_router(selected_job_router)
+    application.include_router(selected_job_router, prefix=settings.api_prefix)
     application.include_router(recommend.router, prefix="/recommend", tags=["recommend"])
     application.include_router(recommendations.router)
     application.include_router(admin_router)
