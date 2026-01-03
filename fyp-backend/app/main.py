@@ -69,6 +69,9 @@ def create_app() -> FastAPI:
     application.include_router(majors_router, prefix=settings.api_prefix)
     application.include_router(ml_recommend_router, prefix=settings.api_prefix)
     application.include_router(legacy_recommend_router, prefix=settings.api_prefix)
+    # Support both legacy (no API prefix) and newer (API-prefixed) clients.
+    # Frontend `/api/legacy/...` proxy forwards to upstream without `settings.api_prefix`.
+    application.include_router(api_user_pathway_router)
     application.include_router(api_user_pathway_router, prefix=settings.api_prefix)
 
     # Avoid accidental schema changes in shared MySQL databases.
