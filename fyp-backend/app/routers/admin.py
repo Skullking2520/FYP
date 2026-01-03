@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 from sqlalchemy.engine import make_url
+from sqlalchemy.inspection import inspect
 
 from app.config import is_admin_email
 from app.config import build_sqlalchemy_db_url, settings
@@ -229,7 +230,10 @@ def admin_debug_db(
 
     def _count(model) -> int:
         try:
-            return int(db.query(func.count(model.id)).scalar() or 0)
+            mapper = inspect(model)
+            pk_cols = list(getattr(mapper, "primary_key", []) or [])
+            col = pk_cols[0] if pk_cols else getattr(model, "id")
+            return int(db.query(func.count(col)).scalar() or 0)
         except Exception:
             return -1
 
