@@ -11,6 +11,7 @@ class SkillSearchItem(BaseModel):
     name: str
     source: str | None = None
     dimension: str | None = None
+    description: str | None = None
 
 
 class JobDetail(BaseModel):
@@ -169,6 +170,7 @@ class SkillResourceItem(BaseModel):
 class SkillResolveItem(BaseModel):
     skill_key: str
     skill_name: str | None = None
+    skill_description: str | None = None
     resolved: bool
 
 

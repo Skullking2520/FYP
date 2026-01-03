@@ -76,13 +76,14 @@ def search_skills(q: str = Query(default="", min_length=0)) -> list[SkillSearchI
         return []
 
     # Primary: careerpath normalized table (skill)
-    sql = """
+        sql_with_desc = """
     SELECT DISTINCT
       s.id AS id,
       s.skill_key,
       s.name,
       s.source,
-      NULL AS dimension
+            NULL AS dimension,
+            s.description AS description
     FROM skill s
     LEFT JOIN skill_alias a ON a.skill_id = s.id
     WHERE s.name LIKE CONCAT('%', :q, '%')
@@ -91,15 +92,32 @@ def search_skills(q: str = Query(default="", min_length=0)) -> list[SkillSearchI
     LIMIT 50;
     """
 
+        sql_no_desc = """
+        SELECT DISTINCT
+            s.id AS id,
+            s.skill_key,
+            s.name,
+            s.source,
+            NULL AS dimension,
+            NULL AS description
+        FROM skill s
+        LEFT JOIN skill_alias a ON a.skill_id = s.id
+        WHERE s.name LIKE CONCAT('%', :q, '%')
+             OR a.alias_key LIKE CONCAT('%', :q, '%')
+        ORDER BY s.name
+        LIMIT 50;
+        """
+
     # Fallback: ESCO raw table (esco_skills)
     # We synthesize an integer id using CRC32(conceptUri) for stable UI keys.
-    fallback_sql = """
+        fallback_sql_with_desc = """
     SELECT
       CRC32(conceptUri) AS id,
       conceptUri AS skill_key,
       preferredLabel AS name,
       'ESCO' AS source,
-      NULL AS dimension
+            skillType AS dimension,
+            COALESCE(NULLIF(description, ''), NULLIF(definition, ''), NULL) AS description
     FROM esco_skills
     WHERE preferredLabel LIKE CONCAT('%', :q, '%')
        OR altLabels LIKE CONCAT('%', :q, '%')
@@ -107,15 +125,36 @@ def search_skills(q: str = Query(default="", min_length=0)) -> list[SkillSearchI
     LIMIT 50;
     """
 
+        fallback_sql_no_desc = """
+        SELECT
+            CRC32(conceptUri) AS id,
+            conceptUri AS skill_key,
+            preferredLabel AS name,
+            'ESCO' AS source,
+            skillType AS dimension,
+            NULL AS description
+        FROM esco_skills
+        WHERE preferredLabel LIKE CONCAT('%', :q, '%')
+             OR altLabels LIKE CONCAT('%', :q, '%')
+        ORDER BY preferredLabel
+        LIMIT 50;
+        """
+
     try:
-        rows = query(sql, {"q": q})
+        try:
+            rows = query(sql_with_desc, {"q": q})
+        except DatabaseQueryError:
+            rows = query(sql_no_desc, {"q": q})
         return [SkillSearchItem.model_validate(row) for row in rows]
     except DatabaseConnectionError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except DatabaseQueryError as exc:
         # DB schema may not have `skill` table (or it may be empty). Try ESCO fallback.
         try:
-            rows = query(fallback_sql, {"q": q})
+            try:
+                rows = query(fallback_sql_with_desc, {"q": q})
+            except DatabaseQueryError:
+                rows = query(fallback_sql_no_desc, {"q": q})
             return [SkillSearchItem.model_validate(row) for row in rows]
         except DatabaseConnectionError as exc2:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc2)) from exc2
@@ -330,33 +369,96 @@ def resolve_skill_name(skill_key: str = Query(min_length=1)) -> SkillResolveItem
         return SkillResolveItem(skill_key=skill_key, skill_name=None, resolved=False)
 
     try:
+        name: str | None = None
+        desc: str | None = None
+
         if ref.isdigit():
-            row = query_one(
-                """
-                SELECT name
-                FROM skill
-                WHERE id = :skill_id
-                LIMIT 1;
-                """.strip(),
-                {"skill_id": int(ref)},
-            )
-            name = (row or {}).get("name")
+            # Prefer the normalized `skill` table by numeric id.
+            try:
+                row = query_one(
+                    """
+                    SELECT name, description
+                    FROM skill
+                    WHERE id = :skill_id
+                    LIMIT 1;
+                    """.strip(),
+                    {"skill_id": int(ref)},
+                )
+                name = (row or {}).get("name")
+                desc = (row or {}).get("description")
+            except DatabaseQueryError:
+                row = query_one(
+                    """
+                    SELECT name
+                    FROM skill
+                    WHERE id = :skill_id
+                    LIMIT 1;
+                    """.strip(),
+                    {"skill_id": int(ref)},
+                )
+                name = (row or {}).get("name")
         else:
-            row = query_one(
-                """
-                SELECT name
-                FROM skill
-                WHERE skill_key = :skill_key
-                LIMIT 1;
-                """.strip(),
-                {"skill_key": ref},
-            )
-            name = (row or {}).get("name")
+            # First try normalized `skill` table.
+            try:
+                row = query_one(
+                    """
+                    SELECT name, description
+                    FROM skill
+                    WHERE skill_key = :skill_key
+                    LIMIT 1;
+                    """.strip(),
+                    {"skill_key": ref},
+                )
+                name = (row or {}).get("name")
+                desc = (row or {}).get("description")
+            except DatabaseQueryError:
+                row = query_one(
+                    """
+                    SELECT name
+                    FROM skill
+                    WHERE skill_key = :skill_key
+                    LIMIT 1;
+                    """.strip(),
+                    {"skill_key": ref},
+                )
+                name = (row or {}).get("name")
+
+            # If not found and the input looks like an ESCO URI, resolve via esco_skills.
+            if not (str(name).strip() if name is not None else "") and _SKILL_URI_RE.match(ref):
+                try:
+                    row = query_one(
+                        """
+                        SELECT preferredLabel AS name,
+                               COALESCE(NULLIF(description, ''), NULLIF(definition, ''), NULL) AS description
+                        FROM esco_skills
+                        WHERE conceptUri = :uri
+                        LIMIT 1;
+                        """.strip(),
+                        {"uri": ref},
+                    )
+                except DatabaseQueryError:
+                    row = query_one(
+                        """
+                        SELECT preferredLabel AS name
+                        FROM esco_skills
+                        WHERE conceptUri = :uri
+                        LIMIT 1;
+                        """.strip(),
+                        {"uri": ref},
+                    )
+                name = (row or {}).get("name")
+                desc = (row or {}).get("description")
 
         skill_name = (str(name).strip() if name is not None else "") or None
-        return SkillResolveItem(skill_key=ref, skill_name=skill_name, resolved=bool(skill_name))
+        skill_description = (str(desc).strip() if desc is not None else "") or None
+        return SkillResolveItem(
+            skill_key=ref,
+            skill_name=skill_name,
+            skill_description=skill_description,
+            resolved=bool(skill_name),
+        )
     except (DatabaseConnectionError, DatabaseQueryError):
-        return SkillResolveItem(skill_key=ref, skill_name=None, resolved=False)
+        return SkillResolveItem(skill_key=ref, skill_name=None, skill_description=None, resolved=False)
 
 
 @router.post("/skills/resolve", response_model=SkillResolveResponse)
@@ -384,46 +486,113 @@ def resolve_skill_names(request: SkillResolveRequest) -> SkillResolveResponse:
             key_strings.append(k)
 
     name_by_input: dict[str, str] = {}
+    desc_by_input: dict[str, str] = {}
     try:
         if numeric_ids:
-            sql = """
+            sql_with_desc = """
+            SELECT id, name, description
+            FROM skill
+            WHERE id IN (:skill_ids)
+            """.strip()
+            sql_no_desc = """
             SELECT id, name
             FROM skill
             WHERE id IN (:skill_ids)
             """.strip()
-            sql, params = expand_in_clause(sql, {"skill_ids": numeric_ids}, "skill_ids")
-            rows = query(sql, params)
+
+            try:
+                sql, params = expand_in_clause(sql_with_desc, {"skill_ids": numeric_ids}, "skill_ids")
+                rows = query(sql, params)
+            except DatabaseQueryError:
+                sql, params = expand_in_clause(sql_no_desc, {"skill_ids": numeric_ids}, "skill_ids")
+                rows = query(sql, params)
+
             for r in rows:
                 sid = r.get("id")
                 name = (r.get("name") or "").strip()
+                d = (r.get("description") or "").strip() if r.get("description") is not None else ""
                 if sid is None or not name:
                     continue
                 name_by_input[str(int(sid))] = name
+                if d:
+                    desc_by_input[str(int(sid))] = d
 
         if key_strings:
-            sql = """
+            sql_with_desc = """
+            SELECT skill_key, name, description
+            FROM skill
+            WHERE skill_key IN (:skill_keys)
+            """.strip()
+            sql_no_desc = """
             SELECT skill_key, name
             FROM skill
             WHERE skill_key IN (:skill_keys)
             """.strip()
-            sql, params = expand_in_clause(sql, {"skill_keys": key_strings}, "skill_keys")
-            rows = query(sql, params)
+
+            try:
+                sql, params = expand_in_clause(sql_with_desc, {"skill_keys": key_strings}, "skill_keys")
+                rows = query(sql, params)
+            except DatabaseQueryError:
+                sql, params = expand_in_clause(sql_no_desc, {"skill_keys": key_strings}, "skill_keys")
+                rows = query(sql, params)
+
             for r in rows:
                 k = (r.get("skill_key") or "").strip()
                 name = (r.get("name") or "").strip()
+                d = (r.get("description") or "").strip() if r.get("description") is not None else ""
                 if not k or not name:
                     continue
                 name_by_input[k] = name
+                if d:
+                    desc_by_input[k] = d
+
+        # ESCO URI support (via esco_skills). Only attempt for keys that look like ESCO URIs.
+        esco_uris = [k for k in key_strings if _SKILL_URI_RE.match(k)]
+        if esco_uris:
+            sql_with_desc = """
+            SELECT conceptUri AS skill_key,
+                   preferredLabel AS name,
+                   COALESCE(NULLIF(description, ''), NULLIF(definition, ''), NULL) AS description
+            FROM esco_skills
+            WHERE conceptUri IN (:skill_keys)
+            """.strip()
+            sql_no_desc = """
+            SELECT conceptUri AS skill_key,
+                   preferredLabel AS name
+            FROM esco_skills
+            WHERE conceptUri IN (:skill_keys)
+            """.strip()
+
+            try:
+                sql, params = expand_in_clause(sql_with_desc, {"skill_keys": esco_uris}, "skill_keys")
+                rows = query(sql, params)
+            except DatabaseQueryError:
+                sql, params = expand_in_clause(sql_no_desc, {"skill_keys": esco_uris}, "skill_keys")
+                rows = query(sql, params)
+
+            for r in rows:
+                k = (r.get("skill_key") or "").strip()
+                name = (r.get("name") or "").strip()
+                d = (r.get("description") or "").strip() if r.get("description") is not None else ""
+                if not k or not name:
+                    continue
+                # Do not override skill table matches; ESCO is fallback.
+                if k not in name_by_input:
+                    name_by_input[k] = name
+                if d and k not in desc_by_input:
+                    desc_by_input[k] = d
     except (DatabaseConnectionError, DatabaseQueryError):
         name_by_input = {}
+        desc_by_input = {}
 
     items: list[SkillResolveItem] = []
     for k in cleaned:
         if not k:
-            items.append(SkillResolveItem(skill_key=k, skill_name=None, resolved=False))
+            items.append(SkillResolveItem(skill_key=k, skill_name=None, skill_description=None, resolved=False))
             continue
         name = name_by_input.get(k)
-        items.append(SkillResolveItem(skill_key=k, skill_name=name, resolved=bool(name)))
+        desc = desc_by_input.get(k)
+        items.append(SkillResolveItem(skill_key=k, skill_name=name, skill_description=desc, resolved=bool(name)))
 
     return SkillResolveResponse(items=items)
 
