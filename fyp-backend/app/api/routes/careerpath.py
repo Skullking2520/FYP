@@ -76,6 +76,17 @@ def search_skills(q: str = Query(default="", min_length=0)) -> list[SkillSearchI
     if not q:
         return []
 
+    def _normalize_desc_row(row: dict) -> dict:
+        try:
+            desc = row.get("description")
+            if desc is None:
+                return row
+            s = str(desc).strip()
+            row["description"] = s or None
+            return row
+        except Exception:
+            return row
+
     # Primary: careerpath normalized table (skill)
     sql_base = """
     SELECT DISTINCT
@@ -100,9 +111,15 @@ def search_skills(q: str = Query(default="", min_length=0)) -> list[SkillSearchI
         s.name,
         s.source,
         NULL AS dimension,
-        s.description AS description
+        COALESCE(
+            NULLIF(TRIM(s.description), ''),
+            NULLIF(TRIM(es.description), ''),
+            NULLIF(TRIM(es.definition), ''),
+            NULL
+        ) AS description
     FROM skill s
     LEFT JOIN skill_alias a ON a.skill_id = s.id
+    LEFT JOIN esco_skills es ON es.conceptUri = s.skill_key
     WHERE s.name LIKE CONCAT('%', :q, '%')
          OR a.alias_key LIKE CONCAT('%', :q, '%')
     ORDER BY s.name
@@ -133,7 +150,7 @@ def search_skills(q: str = Query(default="", min_length=0)) -> list[SkillSearchI
         preferredLabel AS name,
         'ESCO' AS source,
         skillType AS dimension,
-        COALESCE(NULLIF(description, ''), NULLIF(definition, ''), NULL) AS description
+        COALESCE(NULLIF(TRIM(description), ''), NULLIF(TRIM(definition), ''), NULL) AS description
     FROM esco_skills
     WHERE preferredLabel LIKE CONCAT('%', :q, '%')
          OR altLabels LIKE CONCAT('%', :q, '%')
@@ -146,7 +163,7 @@ def search_skills(q: str = Query(default="", min_length=0)) -> list[SkillSearchI
             rows = query(sql_with_desc, {"q": q})
         except DatabaseQueryError:
             rows = query(sql_base, {"q": q})
-        return [SkillSearchItem.model_validate(row) for row in rows]
+        return [SkillSearchItem.model_validate(_normalize_desc_row(row)) for row in rows]
     except DatabaseConnectionError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except DatabaseQueryError as exc:
@@ -156,7 +173,7 @@ def search_skills(q: str = Query(default="", min_length=0)) -> list[SkillSearchI
                 rows = query(fallback_sql_with_desc, {"q": q})
             except DatabaseQueryError:
                 rows = query(fallback_sql_base, {"q": q})
-            return [SkillSearchItem.model_validate(row) for row in rows]
+            return [SkillSearchItem.model_validate(_normalize_desc_row(row)) for row in rows]
         except DatabaseConnectionError as exc2:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc2)) from exc2
         except DatabaseQueryError as exc2:
