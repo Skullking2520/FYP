@@ -34,6 +34,7 @@ from app.schemas.reco_tracking import RecommendPickRequest, RecommendPickRespons
 from app.schemas.ml_recommend import RecommendJobsCompatItem
 from app.services.ml_recommender import recommend_jobs as ml_recommend_jobs
 from app.services.ml_recommender import resolve_skill_labels
+from app.routers.dependencies import get_current_user_optional
 
 
 router = APIRouter(tags=["careerpath"])
@@ -949,6 +950,7 @@ def recommend_jobs(
 def pick_recommended_job(
     payload: RecommendPickRequest,
     db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user_optional),
 ) -> RecommendPickResponse:
     event = (
         db.query(RecommendationEvent)
@@ -973,6 +975,7 @@ def pick_recommended_job(
     picked_at = payload.picked_at or datetime.now(timezone.utc)
     pick = RecommendationPick(
         recommendation_id=payload.recommendation_id,
+        user_id=current_user.id if current_user is not None else None,
         chosen_job_id=str(payload.chosen_job_id),
         chosen_rank=chosen_rank,
         picked_at=picked_at,
