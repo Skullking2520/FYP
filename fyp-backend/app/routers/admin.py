@@ -7,8 +7,10 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
+from sqlalchemy.engine import make_url
 
 from app.config import is_admin_email
+from app.config import build_sqlalchemy_db_url, settings
 from app.database import get_db
 from app.models.user import User
 from app.models.user_current_job import UserCurrentJob
@@ -23,6 +25,13 @@ from app.schemas.reco_tracking import SkillRecoPickPoint
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 logger = logging.getLogger(__name__)
+
+
+def _mask_db_url(db_url: str) -> str:
+    try:
+        return str(make_url(db_url).set(password="***"))
+    except Exception:
+        return db_url
 
 
 def _require_admin(current_user: User = Depends(get_current_user)) -> User:
@@ -200,3 +209,43 @@ def get_admin_stats(
         match_score_buckets=match_score_buckets,
         skill_reco_picks_series=skill_reco_picks_series if skill_reco_picks_series else None,
     )
+
+
+@router.get("/_debug/db")
+def admin_debug_db(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(_require_admin_stats),
+):
+    """Admin-only diagnostics for production debugging.
+
+    Returns only non-sensitive information (passwords masked) to help confirm
+    which DB the ORM layer is using and whether key tables contain data.
+    """
+
+    try:
+        orm_url = build_sqlalchemy_db_url(settings)
+    except Exception:
+        orm_url = ""
+
+    def _count(model) -> int:
+        try:
+            return int(db.query(func.count(model.id)).scalar() or 0)
+        except Exception:
+            return -1
+
+    return {
+        "generated_at": _iso_now().isoformat(),
+        "environment": settings.environment,
+        "api_prefix": settings.api_prefix,
+        "orm_db_url": _mask_db_url(orm_url) if orm_url else None,
+        "db_url_present": bool(settings.db_url),
+        "orm_db_url_present": bool(settings.orm_db_url),
+        "orm_use_mysql": bool(settings.orm_use_mysql),
+        "tables": {
+            "users": _count(User),
+            "user_current_job": _count(UserCurrentJob),
+            "user_selected_job_match": _count(UserSelectedJobMatch),
+            "recommendation_event": _count(RecommendationEvent),
+            "recommendation_pick": _count(RecommendationPick),
+        },
+    }
