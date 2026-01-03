@@ -75,24 +75,8 @@ def search_skills(q: str = Query(default="", min_length=0)) -> list[SkillSearchI
     if not q.strip():
         return []
 
-    # Primary: careerpath normalized table (skill)
-        sql_with_desc = """
-    SELECT DISTINCT
-      s.id AS id,
-      s.skill_key,
-      s.name,
-      s.source,
-            NULL AS dimension,
-            s.description AS description
-    FROM skill s
-    LEFT JOIN skill_alias a ON a.skill_id = s.id
-    WHERE s.name LIKE CONCAT('%', :q, '%')
-       OR a.alias_key LIKE CONCAT('%', :q, '%')
-    ORDER BY s.name
-    LIMIT 50;
-    """
-
-        sql_no_desc = """
+        # Primary: careerpath normalized table (skill)
+        sql_base = """
         SELECT DISTINCT
             s.id AS id,
             s.skill_key,
@@ -108,24 +92,25 @@ def search_skills(q: str = Query(default="", min_length=0)) -> list[SkillSearchI
         LIMIT 50;
         """
 
-    # Fallback: ESCO raw table (esco_skills)
-    # We synthesize an integer id using CRC32(conceptUri) for stable UI keys.
-        fallback_sql_with_desc = """
-    SELECT
-      CRC32(conceptUri) AS id,
-      conceptUri AS skill_key,
-      preferredLabel AS name,
-      'ESCO' AS source,
-            skillType AS dimension,
-            COALESCE(NULLIF(description, ''), NULLIF(definition, ''), NULL) AS description
-    FROM esco_skills
-    WHERE preferredLabel LIKE CONCAT('%', :q, '%')
-       OR altLabels LIKE CONCAT('%', :q, '%')
-    ORDER BY preferredLabel
-    LIMIT 50;
-    """
+        sql_with_desc = """
+        SELECT DISTINCT
+            s.id AS id,
+            s.skill_key,
+            s.name,
+            s.source,
+            NULL AS dimension,
+            s.description AS description
+        FROM skill s
+        LEFT JOIN skill_alias a ON a.skill_id = s.id
+        WHERE s.name LIKE CONCAT('%', :q, '%')
+             OR a.alias_key LIKE CONCAT('%', :q, '%')
+        ORDER BY s.name
+        LIMIT 50;
+        """
 
-        fallback_sql_no_desc = """
+        # Fallback: ESCO raw table (esco_skills)
+        # We synthesize an integer id using CRC32(conceptUri) for stable UI keys.
+        fallback_sql_base = """
         SELECT
             CRC32(conceptUri) AS id,
             conceptUri AS skill_key,
@@ -140,11 +125,26 @@ def search_skills(q: str = Query(default="", min_length=0)) -> list[SkillSearchI
         LIMIT 50;
         """
 
+        fallback_sql_with_desc = """
+        SELECT
+            CRC32(conceptUri) AS id,
+            conceptUri AS skill_key,
+            preferredLabel AS name,
+            'ESCO' AS source,
+            skillType AS dimension,
+            COALESCE(NULLIF(description, ''), NULLIF(definition, ''), NULL) AS description
+        FROM esco_skills
+        WHERE preferredLabel LIKE CONCAT('%', :q, '%')
+             OR altLabels LIKE CONCAT('%', :q, '%')
+        ORDER BY preferredLabel
+        LIMIT 50;
+        """
+
     try:
         try:
             rows = query(sql_with_desc, {"q": q})
-        except DatabaseQueryError:
-            rows = query(sql_no_desc, {"q": q})
+        except Exception:
+            rows = query(sql_base, {"q": q})
         return [SkillSearchItem.model_validate(row) for row in rows]
     except DatabaseConnectionError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
@@ -153,8 +153,8 @@ def search_skills(q: str = Query(default="", min_length=0)) -> list[SkillSearchI
         try:
             try:
                 rows = query(fallback_sql_with_desc, {"q": q})
-            except DatabaseQueryError:
-                rows = query(fallback_sql_no_desc, {"q": q})
+            except Exception:
+                rows = query(fallback_sql_base, {"q": q})
             return [SkillSearchItem.model_validate(row) for row in rows]
         except DatabaseConnectionError as exc2:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc2)) from exc2
