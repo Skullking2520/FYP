@@ -137,8 +137,10 @@ def build_sqlalchemy_db_url(settings: Settings) -> str:
     if settings.orm_db_url:
         return settings.orm_db_url
 
-    # Backwards compatibility: tests/dev may still set DB_URL to a sqlite file.
-    if settings.db_url and settings.db_url.startswith("sqlite"):
+    # Backwards compatibility: allow DB_URL to configure the ORM directly.
+    # This is especially important in deployments that only set DB_URL but do not
+    # set ORM_DB_URL/ORM_USE_MYSQL; we should not silently fall back to sqlite.
+    if settings.db_url:
         return settings.db_url
 
     # In development, default ORM to sqlite unless explicitly configured.
@@ -152,9 +154,7 @@ def build_sqlalchemy_db_url(settings: Settings) -> str:
             )
         return "sqlite:///./dev.db"
 
-    # Production fallback: use DB_URL (typically MySQL) or discrete DB_* components.
-    if settings.db_url:
-        return settings.db_url
+    # Production fallback: use discrete DB_* components.
     # NOTE: password may include special chars; pymysql/sqlalchemy will handle URL parsing,
     # but safest is to rely on DB_URL for complex passwords.
     return (
