@@ -20,6 +20,7 @@ from app.schemas.careerpath import (
     JobSearchItem,
     JobSkillItem,
     LinkedMajor,
+    RecommendMajorItem,
     SkillResourceItem,
     SkillResolveItem,
     SkillResolveRequest,
@@ -27,6 +28,7 @@ from app.schemas.careerpath import (
     RecommendJobItem,
     RecommendJobsRequest,
     SkillSearchItem,
+    SkillDetail,
 )
 
 from app.schemas.reco_tracking import RecommendPickRequest, RecommendPickResponse
@@ -38,6 +40,8 @@ from app.routers.dependencies import get_current_user_optional
 
 
 router = APIRouter(tags=["careerpath"])
+# Only routes safe to expose at root for legacy proxies.
+legacy_proxy_router = APIRouter(tags=["careerpath-legacy-proxy"])
 
 
 _SKILL_URI_RE = re.compile(r"^https?://data\.europa\.eu/esco/skill/[0-9a-fA-F-]{36}$")
@@ -56,7 +60,10 @@ def _resolve_job_pk(job_ref: str) -> int:
     if ref.isdigit():
         return int(ref)
 
-    row = query_one(
+    # Use module reference so unit tests can monkeypatch `app.db.mysql.query`.
+    from app.db import mysql as mysql_db
+
+    row = mysql_db.query_one(
         """
         SELECT id
         FROM job
@@ -88,6 +95,23 @@ def search_skills(q: str = Query(default="", min_length=0)) -> list[SkillSearchI
         except Exception:
             return row
 
+    def _normalize_category_row(row: dict) -> dict:
+        # Keep category stable for frontend filters.
+        # Prefer explicit category if present, else fall back to dimension.
+        try:
+            dim = row.get("dimension")
+            cat = row.get("category")
+
+            dim_s = str(dim).strip() if dim is not None else ""
+            cat_s = str(cat).strip() if cat is not None else ""
+
+            row["dimension"] = dim_s or None
+            # For search UI, avoid `null` category (fallback to a stable bucket).
+            row["category"] = (cat_s or dim_s) or "General"
+            return row
+        except Exception:
+            return row
+
     # Primary: careerpath normalized table (skill)
     sql_base = """
     SELECT DISTINCT
@@ -96,9 +120,30 @@ def search_skills(q: str = Query(default="", min_length=0)) -> list[SkillSearchI
         s.name,
         s.source,
         NULL AS dimension,
+        NULL AS category,
         NULL AS description
     FROM skill s
     LEFT JOIN skill_alias a ON a.skill_id = s.id
+    WHERE s.name LIKE CONCAT('%', :q, '%')
+         OR a.alias_key LIKE CONCAT('%', :q, '%')
+    ORDER BY s.name
+    LIMIT 50;
+    """
+
+    # Optional enrichment: if `esco_skills` exists, use its skillType as `dimension`.
+    # This helps the frontend derive Category labels without needing a separate API.
+    sql_with_dim = """
+    SELECT DISTINCT
+        s.id AS id,
+        s.skill_key,
+        s.name,
+        s.source,
+        es.skillType AS dimension,
+        es.skillType AS category,
+        NULL AS description
+    FROM skill s
+    LEFT JOIN skill_alias a ON a.skill_id = s.id
+    LEFT JOIN esco_skills es ON es.conceptUri = s.skill_key
     WHERE s.name LIKE CONCAT('%', :q, '%')
          OR a.alias_key LIKE CONCAT('%', :q, '%')
     ORDER BY s.name
@@ -111,7 +156,8 @@ def search_skills(q: str = Query(default="", min_length=0)) -> list[SkillSearchI
         s.skill_key,
         s.name,
         s.source,
-        NULL AS dimension,
+        es.skillType AS dimension,
+        es.skillType AS category,
         COALESCE(
             NULLIF(TRIM(s.description), ''),
             NULLIF(TRIM(es.description), ''),
@@ -136,6 +182,7 @@ def search_skills(q: str = Query(default="", min_length=0)) -> list[SkillSearchI
         preferredLabel AS name,
         'ESCO' AS source,
         skillType AS dimension,
+        skillType AS category,
         NULL AS description
     FROM esco_skills
     WHERE preferredLabel LIKE CONCAT('%', :q, '%')
@@ -151,6 +198,7 @@ def search_skills(q: str = Query(default="", min_length=0)) -> list[SkillSearchI
         preferredLabel AS name,
         'ESCO' AS source,
         skillType AS dimension,
+        skillType AS category,
         COALESCE(NULLIF(TRIM(description), ''), NULLIF(TRIM(definition), ''), NULL) AS description
     FROM esco_skills
     WHERE preferredLabel LIKE CONCAT('%', :q, '%')
@@ -163,8 +211,11 @@ def search_skills(q: str = Query(default="", min_length=0)) -> list[SkillSearchI
         try:
             rows = query(sql_with_desc, {"q": q})
         except DatabaseQueryError:
-            rows = query(sql_base, {"q": q})
-        return [SkillSearchItem.model_validate(_normalize_desc_row(row)) for row in rows]
+            try:
+                rows = query(sql_with_dim, {"q": q})
+            except DatabaseQueryError:
+                rows = query(sql_base, {"q": q})
+        return [SkillSearchItem.model_validate(_normalize_category_row(_normalize_desc_row(row))) for row in rows]
     except DatabaseConnectionError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except DatabaseQueryError as exc:
@@ -174,7 +225,7 @@ def search_skills(q: str = Query(default="", min_length=0)) -> list[SkillSearchI
                 rows = query(fallback_sql_with_desc, {"q": q})
             except DatabaseQueryError:
                 rows = query(fallback_sql_base, {"q": q})
-            return [SkillSearchItem.model_validate(_normalize_desc_row(row)) for row in rows]
+            return [SkillSearchItem.model_validate(_normalize_category_row(_normalize_desc_row(row))) for row in rows]
         except DatabaseConnectionError as exc2:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc2)) from exc2
         except DatabaseQueryError as exc2:
@@ -616,8 +667,143 @@ def resolve_skill_names(request: SkillResolveRequest) -> SkillResolveResponse:
     return SkillResolveResponse(items=items)
 
 
-@router.get("/jobs/{job_id}", response_model=JobDetail)
-def get_job(job_id: str, request: Request) -> JobDetail:
+def _get_skill_detail_by_ref(ref: str) -> SkillDetail:
+    ref = (ref or "").strip()
+    if not ref:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="skill_ref is required")
+
+    sql_skill = """
+    SELECT
+        s.id AS id,
+        s.skill_key,
+        s.name,
+        s.source,
+        es.skillType AS dimension,
+        es.skillType AS category,
+        COALESCE(
+            NULLIF(TRIM(s.description), ''),
+            NULLIF(TRIM(es.description), ''),
+            NULLIF(TRIM(es.definition), ''),
+            NULL
+        ) AS description
+    FROM skill s
+    LEFT JOIN esco_skills es ON es.conceptUri = s.skill_key
+    WHERE (s.skill_key = :ref)
+       OR (s.id = :sid)
+    LIMIT 1;
+    """.strip()
+
+    try:
+        sid = int(ref) if ref.isdigit() else -1
+    except Exception:
+        sid = -1
+
+    try:
+        row = query_one(sql_skill, {"ref": ref, "sid": sid})
+    except DatabaseConnectionError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except DatabaseQueryError:
+        row = None
+
+    if row and row.get("skill_key") and row.get("name"):
+        dim = (row.get("dimension") or "").strip() if row.get("dimension") is not None else ""
+        cat = (row.get("category") or "").strip() if row.get("category") is not None else ""
+        row["dimension"] = dim or None
+        row["category"] = (cat or dim) or None
+
+        d = (row.get("description") or "").strip() if row.get("description") is not None else ""
+        row["description"] = d or None
+
+        if row.get("id") is None:
+            row["id"] = _stable_int_id(str(row.get("skill_key")))
+        return SkillDetail.model_validate(row)
+
+    if _SKILL_URI_RE.match(ref):
+        try:
+            row2 = query_one(
+                """
+                SELECT
+                    CRC32(conceptUri) AS id,
+                    conceptUri AS skill_key,
+                    preferredLabel AS name,
+                    'ESCO' AS source,
+                    skillType AS dimension,
+                    skillType AS category,
+                    COALESCE(NULLIF(TRIM(description), ''), NULLIF(TRIM(definition), ''), NULL) AS description
+                FROM esco_skills
+                WHERE conceptUri = :ref
+                LIMIT 1;
+                """.strip(),
+                {"ref": ref},
+            )
+        except DatabaseConnectionError as exc:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+        except DatabaseQueryError:
+            row2 = None
+
+        if row2 and row2.get("skill_key") and row2.get("name"):
+            dim = (row2.get("dimension") or "").strip() if row2.get("dimension") is not None else ""
+            cat = (row2.get("category") or "").strip() if row2.get("category") is not None else ""
+            row2["dimension"] = dim or None
+            row2["category"] = (cat or dim) or None
+            d = (row2.get("description") or "").strip() if row2.get("description") is not None else ""
+            row2["description"] = d or None
+            return SkillDetail.model_validate(row2)
+
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill not found")
+
+
+@legacy_proxy_router.get("/skills/detail", response_model=SkillDetail)
+@router.get("/skills/detail", response_model=SkillDetail)
+def get_skill_detail_query(
+    skill_ref: str | None = Query(default=None),
+    skill_key: str | None = Query(default=None),
+) -> SkillDetail:
+    # Query param avoids path normalization / encoding issues for ESCO URIs.
+    # Accept both names because some clients use `skill_key`.
+    raw = (skill_ref if skill_ref is not None else skill_key) or ""
+    ref = unquote(raw.strip())
+    if not ref:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="skill_ref is required")
+    return _get_skill_detail_by_ref(ref)
+
+
+@legacy_proxy_router.get("/legacy/skills/get", response_model=SkillDetail)
+@router.get("/legacy/skills/get", response_model=SkillDetail)
+def legacy_skill_get(skill_key: str = Query(min_length=1)) -> SkillDetail:
+    # Frontend compatibility: older clients call /api/legacy/skills/get?skill_key=...
+    ref = unquote((skill_key or "").strip())
+    return _get_skill_detail_by_ref(ref)
+
+
+@legacy_proxy_router.get("/legacy/skills/detail", response_model=SkillDetail)
+@router.get("/legacy/skills/detail", response_model=SkillDetail)
+def legacy_skill_detail(skill_key: str = Query(min_length=1)) -> SkillDetail:
+    # Frontend compatibility: older clients call /api/legacy/skills/detail?skill_key=...
+    ref = unquote((skill_key or "").strip())
+    return _get_skill_detail_by_ref(ref)
+
+
+@legacy_proxy_router.get("/skills/detail/{skill_ref:path}", response_model=SkillDetail)
+@legacy_proxy_router.get("/skills/{skill_ref:path}", response_model=SkillDetail)
+@router.get("/skills/detail/{skill_ref:path}", response_model=SkillDetail)
+@router.get("/skills/{skill_ref:path}", response_model=SkillDetail)
+def get_skill_detail(skill_ref: str) -> SkillDetail:
+    """Return a stable skill detail payload for lazy-load in the frontend.
+
+    Supports:
+    - numeric skill id (normalized `skill` table)
+    - skill_key (e.g., 'python')
+    - ESCO skill URI (http://data.europa.eu/esco/skill/...) with slashes
+    """
+
+    ref = unquote((skill_ref or "").strip())
+    if not ref:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="skill_ref is required")
+    return _get_skill_detail_by_ref(ref)
+
+
+def _get_job_impl(job_id: str, request: Request) -> JobDetail:
     sql = """
     SELECT
       id, occupation_uid, source, onet_soc_code, esco_uri, title,
@@ -641,10 +827,13 @@ def get_job(job_id: str, request: Request) -> JobDetail:
         if not ref:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="job_id is required")
 
+        # Use module reference so unit tests can monkeypatch `app.db.mysql.query`.
+        from app.db import mysql as mysql_db
+
         if ref.isdigit():
-            row = query_one(sql, {"job_id": int(ref)})
+            row = mysql_db.query_one(sql, {"job_id": int(ref)})
         else:
-            row = query_one(sql_ref, {"ref": ref})
+            row = mysql_db.query_one(sql_ref, {"ref": ref})
 
         if not row:
             # UX fallback: if the frontend is using ML job URIs but the MySQL job table isn't populated,
@@ -674,6 +863,10 @@ def get_job(job_id: str, request: Request) -> JobDetail:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except DatabaseQueryError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Job detail query failed") from exc
+
+
+def get_job(job_id: str, request: Request) -> JobDetail:
+    return _get_job_impl(job_id, request)
 
 
 @router.get("/jobs/{job_id:path}/detail", response_model=JobDetailWithMajor)
@@ -764,7 +957,7 @@ def get_job_detail_with_major(job_id: str, request: Request) -> JobDetailWithMaj
     return JobDetailWithMajor(job=job, major=None)
 
 
-@router.get("/jobs/{job_id}/skills", response_model=list[JobSkillItem])
+@router.get("/jobs/{job_id:path}/skills", response_model=list[JobSkillItem])
 def get_job_skills(job_id: str, request: Request) -> list[JobSkillItem]:
     sql = """
     SELECT
@@ -788,28 +981,64 @@ def get_job_skills(job_id: str, request: Request) -> list[JobSkillItem]:
                 _ = request
                 return []
             raise
-        rows = query(sql, {"job_id": resolved_job_id})
-        return [
-            JobSkillItem.model_validate(
-                {
-                    "skill_id": row.get("skill_id"),
-                    "skill_key": row.get("skill_key"),
-                    "name": row.get("name"),
-                    "dimension": row.get("dimension"),
-                    "link_source": row.get("link_source"),
-                    "relation_type": row.get("relation_type"),
-                    "importance": row.get("importance"),
-                    "skill_type": row.get("skill_type"),
-                }
+        # Use module reference so unit tests can monkeypatch `app.db.mysql.query`.
+        from app.db import mysql as mysql_db
+
+        rows = mysql_db.query(sql, {"job_id": resolved_job_id})
+        out: list[JobSkillItem] = []
+        for row in rows:
+            key = (row.get("skill_key") or "").strip()
+            name = (row.get("name") or "").strip()
+            if not key or not name:
+                continue
+
+            raw_skill_id = row.get("skill_id")
+            try:
+                skill_id = int(raw_skill_id) if raw_skill_id is not None else _stable_int_id(key)
+            except Exception:
+                skill_id = _stable_int_id(key)
+
+            out.append(
+                JobSkillItem.model_validate(
+                    {
+                        "skill_id": skill_id,
+                        "skill_key": key,
+                        "name": name,
+                        "dimension": row.get("dimension"),
+                        "link_source": row.get("link_source"),
+                        "relation_type": row.get("relation_type"),
+                        "importance": row.get("importance"),
+                        "skill_type": row.get("skill_type"),
+                    }
+                )
             )
-            for row in rows
-        ]
+        return out
     except HTTPException:
         raise
     except DatabaseConnectionError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except DatabaseQueryError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Job skills query failed") from exc
+
+
+@router.get("/jobs/{job_id:path}/majors", response_model=list[RecommendMajorItem])
+def get_job_majors(
+    job_id: str,
+    request: Request,
+    top_k: int = Query(default=5, ge=1, le=50),
+) -> list[RecommendMajorItem]:
+    # Stable contract: keep all /api/jobs/* endpoints working even when job ids are ESCO URLs.
+    # We delegate to the majors module for both numeric job ids and ESCO occupation URIs.
+    from app.api.routes import majors as majors_routes
+
+    ref = unquote((job_id or "").strip())
+    if not ref:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="job_id is required")
+
+    if ref.isdigit():
+        return majors_routes.recommend_majors_for_job(int(ref), top_k=top_k)
+
+    return majors_routes.recommend_majors_for_job_ref(job_ref=ref, request=request, top_k=top_k)
 
 
 @router.post("/recommend/jobs", response_model=list[RecommendJobsCompatItem])
@@ -857,7 +1086,6 @@ def recommend_jobs(
             explicit_uris[key] = max(explicit_uris.get(key, 0.0), float(weight))
         else:
             label_inputs.append((key, float(weight)))
-
     resolved = resolve_skill_labels(assets, label_inputs, threshold=70) if label_inputs else []
 
     # Convert resolved label matches into skill_uris (best match per input)
@@ -1008,3 +1236,9 @@ def db_stats() -> DBStats:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except DatabaseQueryError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="DB stats query failed") from exc
+
+
+# NOTE: Route registration order matters when using the ':path' converter.
+# Register the greedy base job route last so it doesn't shadow
+# /jobs/{job_id:path}/detail, /skills, /majors, or /jobs/search.
+router.add_api_route("/jobs/{job_id:path}", get_job, methods=["GET"], response_model=JobDetail)

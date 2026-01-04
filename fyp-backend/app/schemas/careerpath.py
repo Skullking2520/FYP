@@ -11,6 +11,17 @@ class SkillSearchItem(BaseModel):
     name: str
     source: str | None = None
     dimension: str | None = None
+    category: str | None = None
+    description: str | None = None
+
+
+class SkillDetail(BaseModel):
+    id: int
+    skill_key: str
+    name: str
+    source: str | None = None
+    dimension: str | None = None
+    category: str | None = None
     description: str | None = None
 
 

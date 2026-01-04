@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timezone
 
 from fastapi import APIRouter
@@ -17,6 +18,7 @@ router = APIRouter(prefix="/health", tags=["health"])
 class HealthStatus(BaseModel):
     status: str
     timestamp: datetime
+    git_sha: str | None = None
 
 
 class DBHealthStatus(BaseModel):
@@ -29,7 +31,16 @@ class DBHealthStatus(BaseModel):
 
 @router.get("/", response_model=HealthStatus, summary="API heartbeat")
 def health_check() -> HealthStatus:
-    return HealthStatus(status="ok", timestamp=datetime.now(timezone.utc))
+    sha = (os.getenv("RENDER_GIT_COMMIT") or os.getenv("GIT_SHA") or os.getenv("GITHUB_SHA"))
+    sha = (sha or "").strip() or None
+    return HealthStatus(status="ok", timestamp=datetime.now(timezone.utc), git_sha=sha)
+
+
+@router.get("/version", summary="Deployment version metadata")
+def version_check():
+    sha = (os.getenv("RENDER_GIT_COMMIT") or os.getenv("GIT_SHA") or os.getenv("GITHUB_SHA"))
+    sha = (sha or "").strip() or None
+    return {"git_sha": sha}
 
 
 @router.get("/db", response_model=DBHealthStatus, summary="DB connectivity checks")
