@@ -14,7 +14,7 @@ from app.config import settings
 from app.config import build_sqlalchemy_db_url
 from app.database import Base, engine
 from app.models import Job, Major, Skill, User
-from app.api.routes.careerpath import router as careerpath_router
+from app.api.routes.careerpath import legacy_proxy_router, router as careerpath_router
 from app.api.routes.education import router as education_router
 from app.api.routes.health import router as health_router
 from app.api.routes.legacy_recommend import router as legacy_recommend_router
@@ -61,9 +61,15 @@ def create_app() -> FastAPI:
     application.include_router(auth.router, prefix="/auth", tags=["auth"])
     application.include_router(users.router, prefix="/users", tags=["users"])
     application.include_router(users.router, prefix=f"{settings.api_prefix}/users", tags=["users"])
+    # Stable contract: always expose /api/* even if API_PREFIX is customized.
+    if settings.api_prefix != "/api":
+        application.include_router(users.router, prefix="/api/users", tags=["users"])
     # Support both legacy (no API prefix) and newer (API-prefixed) clients.
     application.include_router(selected_job_router)
     application.include_router(selected_job_router, prefix=settings.api_prefix)
+    # Legacy proxy compatibility: some frontends rewrite `/api/legacy/...` to upstream without `/api`.
+    # Only expose a small safe surface at root.
+    application.include_router(legacy_proxy_router)
     application.include_router(recommend.router, prefix="/recommend", tags=["recommend"])
     application.include_router(recommendations.router)
     application.include_router(admin_router)
@@ -72,10 +78,18 @@ def create_app() -> FastAPI:
     application.include_router(majors_router, prefix=settings.api_prefix)
     application.include_router(ml_recommend_router, prefix=settings.api_prefix)
     application.include_router(legacy_recommend_router, prefix=settings.api_prefix)
+    if settings.api_prefix != "/api":
+        application.include_router(careerpath_router, prefix="/api")
+        application.include_router(education_router, prefix="/api")
+        application.include_router(majors_router, prefix="/api")
+        application.include_router(ml_recommend_router, prefix="/api")
+        application.include_router(legacy_recommend_router, prefix="/api")
     # Support both legacy (no API prefix) and newer (API-prefixed) clients.
     # Frontend `/api/legacy/...` proxy forwards to upstream without `settings.api_prefix`.
     application.include_router(api_user_pathway_router)
     application.include_router(api_user_pathway_router, prefix=settings.api_prefix)
+    if settings.api_prefix != "/api":
+        application.include_router(api_user_pathway_router, prefix="/api")
 
     # Avoid accidental schema changes in shared MySQL databases.
     # For local/test sqlite usage, auto-create ORM tables is still convenient.
