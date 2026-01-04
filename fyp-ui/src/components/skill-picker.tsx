@@ -105,6 +105,7 @@ type Props = {
 
 export function SkillPicker({ value, onChange }: Props) {
   const DETAIL_FETCH_COOLDOWN_MS = 60_000;
+  const DETAIL_PREFETCH_LIMIT = 30;
 
   const [internalSkills, setInternalSkills] = useState<SelectedSkill[]>([]);
   const skills = value ?? internalSkills;
@@ -183,7 +184,7 @@ export function SkillPicker({ value, onChange }: Props) {
     if (Date.now() < detailFetchDisabledUntilRef.current) return;
 
     const needsDetail = batchSource
-      .slice(0, 10)
+      .slice(0, DETAIL_PREFETCH_LIMIT)
       .filter((s) => {
         const anySkill = s as unknown as Record<string, unknown>;
         const category =
