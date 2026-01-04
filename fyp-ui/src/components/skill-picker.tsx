@@ -2,18 +2,89 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { BackendSkill } from "@/types/api";
-import { searchSkills } from "@/lib/backend-api";
-import { lookupSkillMetaByName, type SkillCategory, type SkillDifficulty } from "@/data/skill-meta";
+import { BackendRequestError, getSkillDetail, searchSkills } from "@/lib/backend-api";
+import { lookupSkillMetaByName } from "@/data/skill-meta";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { parseSelectedSkills, SELECTED_SKILLS_STORAGE_KEY } from "@/lib/skills-storage";
+import { formatSkillLabel, parseSelectedSkills, SELECTED_SKILLS_STORAGE_KEY } from "@/lib/skills-storage";
 
 export type SelectedSkill = {
   skill_key: string;
   name: string;
   level: number; // 0-5
 };
+
+function getSkillDescription(skill: BackendSkill): string | null {
+  const anySkill = skill as unknown as Record<string, unknown>;
+  const candidates: unknown[] = [
+    (skill as unknown as { description?: unknown }).description,
+    (skill as unknown as { definition?: unknown }).definition,
+    anySkill["skill_description"],
+    anySkill["skillDefinition"],
+    anySkill["description_text"],
+    anySkill["scope_note"],
+    anySkill["scopeNote"],
+    anySkill["definition_text"],
+  ];
+
+  const cleanText = (text: string): string => {
+    const noTags = text.replace(/<[^>]*>/g, " ");
+    return noTags.replace(/\s+/g, " ").trim();
+  };
+
+  const coerceToText = (value: unknown): string | null => {
+    if (typeof value === "string") {
+      const cleaned = cleanText(value);
+      return cleaned ? cleaned : null;
+    }
+
+    if (Array.isArray(value)) {
+      const parts = value
+        .map((v) => (typeof v === "string" ? cleanText(v) : ""))
+        .map((v) => v.trim())
+        .filter(Boolean);
+      if (parts.length === 0) return null;
+      const joined = cleanText(parts.join(" "));
+      return joined ? joined : null;
+    }
+
+    if (value && typeof value === "object") {
+      const record = value as Record<string, unknown>;
+      const nestedCandidates: unknown[] = [record.text, record.value, record.en, record.description, record.definition];
+      for (const nested of nestedCandidates) {
+        const maybe = coerceToText(nested);
+        if (maybe) return maybe;
+      }
+    }
+
+    return null;
+  };
+
+  for (const c of candidates) {
+    const maybe = coerceToText(c);
+    if (maybe) return maybe;
+  }
+
+  return null;
+}
+
+function getSkillCategoryLabel(skill: BackendSkill): string {
+  const anySkill = skill as unknown as Record<string, unknown>;
+  const raw =
+    anySkill["category"] ??
+    anySkill["skill_category"] ??
+    anySkill["category_name"] ??
+    anySkill["skillType"] ??
+    (skill as unknown as { dimension?: unknown }).dimension;
+
+  if (typeof raw === "string" && raw.trim()) return raw.trim();
+
+  const label = formatSkillLabel(skill.name, skill.skill_key);
+  const meta = lookupSkillMetaByName(label);
+  const fallback = typeof meta?.category === "string" ? meta.category : "";
+  return fallback || "Uncategorized";
+}
 
 function useDebouncedValue<T>(value: T, delayMs: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -33,6 +104,8 @@ type Props = {
 };
 
 export function SkillPicker({ value, onChange }: Props) {
+  const DETAIL_FETCH_COOLDOWN_MS = 60_000;
+
   const [internalSkills, setInternalSkills] = useState<SelectedSkill[]>([]);
   const skills = value ?? internalSkills;
 
@@ -40,12 +113,15 @@ export function SkillPicker({ value, onChange }: Props) {
   const debouncedQuery = useDebouncedValue(query, 250);
 
   const [results, setResults] = useState<BackendSkill[]>([]);
+  const [detailByKey, setDetailByKey] = useState<Record<string, Partial<BackendSkill>>>({});
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [categoryFilter, setCategoryFilter] = useState<SkillCategory | "all">("all");
-  const [difficultyFilter, setDifficultyFilter] = useState<SkillDifficulty | "all">("all");
+  const attemptedDetailKeysRef = useRef<Set<string>>(new Set());
+  const detailFetchDisabledUntilRef = useRef<number>(0);
+
+  const [categoryFilter, setCategoryFilter] = useState<string | "all">("all");
 
   const mountedRef = useRef(false);
 
@@ -73,44 +149,120 @@ export function SkillPicker({ value, onChange }: Props) {
 
   const selectedKeys = useMemo(() => new Set(skills.map((s) => s.skill_key)), [skills]);
 
+  const mergedResults = useMemo(() => {
+    if (!results || results.length === 0) return [];
+    return results.map((skill) => {
+      const patch = detailByKey[skill.skill_key];
+      return patch ? ({ ...skill, ...patch } as BackendSkill) : skill;
+    });
+  }, [results, detailByKey]);
+
   const enrichedResults = useMemo(() => {
-    return results.map((skill) => ({
+    return mergedResults.map((skill) => ({
       skill,
-      meta: lookupSkillMetaByName(skill.name),
+      category: getSkillCategoryLabel(skill),
     }));
-  }, [results]);
+  }, [mergedResults]);
 
   const availableCategories = useMemo(() => {
-    const set = new Set<SkillCategory>();
-    for (const r of enrichedResults) set.add(r.meta.category);
-    return Array.from(set).sort();
-  }, [enrichedResults]);
-
-  const availableDifficulties = useMemo(() => {
-    const set = new Set<SkillDifficulty>();
-    for (const r of enrichedResults) set.add(r.meta.difficulty);
-    return Array.from(set);
+    const set = new Set<string>();
+    for (const r of enrichedResults) set.add(r.category);
+    return Array.from(set).filter(Boolean).sort((a, b) => a.localeCompare(b));
   }, [enrichedResults]);
 
   const filteredResults = useMemo(() => {
     return enrichedResults
-      .filter(({ meta }) => (categoryFilter === "all" ? true : meta.category === categoryFilter))
-      .filter(({ meta }) => (difficultyFilter === "all" ? true : meta.difficulty === difficultyFilter))
+      .filter(({ category }) => (categoryFilter === "all" ? true : category === categoryFilter))
       .map(({ skill }) => skill);
-  }, [enrichedResults, categoryFilter, difficultyFilter]);
+  }, [enrichedResults, categoryFilter]);
+
+  useEffect(() => {
+    // Lazy-load richer skill detail (category/description) for a small batch.
+    const batchSource = filteredResults.length > 0 ? filteredResults : mergedResults;
+    if (!batchSource || batchSource.length === 0) return;
+    if (Date.now() < detailFetchDisabledUntilRef.current) return;
+
+    const needsDetail = batchSource
+      .slice(0, 10)
+      .filter((s) => {
+        const anySkill = s as unknown as Record<string, unknown>;
+        const category =
+          anySkill["category"] ??
+          anySkill["skill_category"] ??
+          anySkill["category_name"] ??
+          anySkill["skillType"] ??
+          (s as unknown as { dimension?: unknown }).dimension;
+        const description =
+          anySkill["description"] ??
+          anySkill["definition"] ??
+          anySkill["scope_note"] ??
+          anySkill["description_text"];
+        return !category || !description;
+      })
+      .map((s) => s.skill_key)
+      .filter((k) => typeof k === "string" && k.length > 0);
+
+    const missing = needsDetail.filter((k) => !attemptedDetailKeysRef.current.has(k));
+    if (missing.length === 0) return;
+
+    let cancelled = false;
+    for (const k of missing) attemptedDetailKeysRef.current.add(k);
+
+    Promise.allSettled(missing.map((k) => getSkillDetail(k)))
+      .then((settled) => {
+        if (cancelled || !mountedRef.current) return;
+
+        const has404 = settled.some((r) => {
+          if (r.status !== "rejected") return false;
+          const reason = r.reason;
+          return reason instanceof BackendRequestError && reason.status === 404;
+        });
+        if (has404) {
+          detailFetchDisabledUntilRef.current = Date.now() + DETAIL_FETCH_COOLDOWN_MS;
+          return;
+        }
+
+        const updates: Record<string, Partial<BackendSkill>> = {};
+        for (let i = 0; i < missing.length; i++) {
+          const key = missing[i];
+          const r = settled[i];
+          if (r.status === "fulfilled" && r.value) updates[key] = r.value;
+          else updates[key] = {};
+        }
+
+        const keys = Object.keys(updates);
+        if (keys.length === 0) return;
+        setDetailByKey((prev) => ({ ...prev, ...updates }));
+      })
+      .catch(() => {
+        // ignore detail failures
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [filteredResults, mergedResults]);
 
   useEffect(() => {
     const q = debouncedQuery.trim();
-    if (!q) {
+    if (!q || q.length < 2) {
       setResults([]);
       setOpen(false);
       setError(null);
+      setDetailByKey({});
+      attemptedDetailKeysRef.current.clear();
+      detailFetchDisabledUntilRef.current = 0;
       return;
     }
 
     let cancelled = false;
     setLoading(true);
     setError(null);
+
+    // New query: clear per-result detail caches.
+    setDetailByKey({});
+    attemptedDetailKeysRef.current.clear();
+    detailFetchDisabledUntilRef.current = 0;
 
     searchSkills(q)
       .then((data) => {
@@ -140,6 +292,8 @@ export function SkillPicker({ value, onChange }: Props) {
     setSkills([...skills, { skill_key: skill.skill_key, name: skill.name, level: 1 }]);
     setQuery("");
     setResults([]);
+    setDetailByKey({});
+    attemptedDetailKeysRef.current.clear();
     setOpen(false);
     setError(null);
   };
@@ -173,29 +327,14 @@ export function SkillPicker({ value, onChange }: Props) {
           <label className="text-xs text-slate-600">
             Category
             <select
-              className="ml-2 h-8 rounded-xl border bg-white px-2"
+              className="ml-2 h-7 rounded-xl border bg-white px-2"
               value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value as SkillCategory | "all")}
+              onChange={(e) => setCategoryFilter(e.target.value as string | "all")}
             >
               <option value="all">All</option>
               {availableCategories.map((c) => (
                 <option key={c} value={c}>
                   {c}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-xs text-slate-600">
-            Difficulty
-            <select
-              className="ml-2 h-8 rounded-xl border bg-white px-2"
-              value={difficultyFilter}
-              onChange={(e) => setDifficultyFilter(e.target.value as SkillDifficulty | "all")}
-            >
-              <option value="all">All</option>
-              {availableDifficulties.map((d) => (
-                <option key={d} value={d}>
-                  {d}
                 </option>
               ))}
             </select>
@@ -216,7 +355,8 @@ export function SkillPicker({ value, onChange }: Props) {
               <ul className="max-h-64 overflow-auto">
                 {filteredResults.map((skill) => {
                   const disabled = selectedKeys.has(skill.skill_key);
-                  const meta = lookupSkillMetaByName(skill.name);
+                  const displayName = formatSkillLabel(skill.name, skill.skill_key) || "Unknown skill";
+                  const description = getSkillDescription(skill);
                   return (
                     <li key={`${skill.skill_key}-${skill.id}`}>
                       <button
@@ -225,12 +365,12 @@ export function SkillPicker({ value, onChange }: Props) {
                         onClick={() => addSkill(skill)}
                         disabled={disabled}
                       >
-                        <div className="font-medium text-slate-900">{skill.name}</div>
-                        <div className="text-xs text-slate-500">
-                          {(skill.source ?? "Unknown").toString()}
-                          {skill.dimension ? ` • ${skill.dimension}` : ""}
-                          {` • ${meta.category} • ${meta.difficulty}`}
-                        </div>
+                        <div className="font-medium text-slate-900">{displayName}</div>
+                        {description ? (
+                          <div className="mt-1 line-clamp-2 text-xs text-slate-600">{description}</div>
+                        ) : (
+                          <div className="mt-1 text-xs text-slate-500">No description available</div>
+                        )}
                       </button>
                     </li>
                   );
@@ -245,7 +385,7 @@ export function SkillPicker({ value, onChange }: Props) {
         {skills.length === 0 && <span className="text-sm text-slate-500">No skills selected yet.</span>}
         {skills.map((skill) => (
           <Badge key={skill.skill_key} variant="secondary" className="gap-2">
-            <span>{skill.name}</span>
+            <span>{formatSkillLabel(skill.name, skill.skill_key)}</span>
 
             <span className="text-xs text-slate-600">Lv {skill.level}</span>
             <input
