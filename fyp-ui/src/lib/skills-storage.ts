@@ -2,6 +2,23 @@ import type { SelectedSkill } from "@/components/skill-picker";
 
 export const SELECTED_SKILLS_STORAGE_KEY = "selected_skills_v1";
 
+export function formatSkillLabel(name: unknown, skill_key: unknown): string {
+  const rawName = typeof name === "string" ? name.trim() : "";
+  if (rawName) return rawName;
+
+  const rawKey = typeof skill_key === "string" ? skill_key.trim() : "";
+  if (!rawKey) return "";
+
+  try {
+    const url = new URL(rawKey);
+    const last = url.pathname.split("/").filter(Boolean).pop();
+    return last ?? rawKey;
+  } catch {
+    const last = rawKey.split("/").filter(Boolean).pop();
+    return last ?? rawKey;
+  }
+}
+
 export function coerceSkillLevel(level: unknown, fallback = 1): number {
   const legacyMapped = level === "advanced" ? 5 : level === "intermediate" ? 3 : level === "beginner" ? 1 : null;
   const numeric = typeof level === "number" ? level : legacyMapped ?? fallback;
