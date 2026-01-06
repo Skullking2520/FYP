@@ -1,0 +1,55 @@
+# Workspace-level ignores (data/research artifacts)
+# Keep Git clean and avoid accidentally committing large datasets.
+
+# OS/editor
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Jupyter / notebooks
+.ipynb_checkpoints/
+*.ipynb
+
+# Local backups / temp
+.git_backup_*/
+_tmp_*/
+
+# Databases
+*.db
+
+# Archives
+*.zip
+
+# Common large data files (root-level)
+/*.csv
+/*.tsv
+/*.jsonl
+/*.parquet
+/*.xlsx
+/*.xls
+
+# Project-specific research/data folders
+/Model/
+/ml/
+/preprocessing_db/
+/db_30_0_excel/
+/fyp-db/
+
+# ESCO raw dataset folder (large)
+/ESCO dataset - v*/
+
+# Backend deployment scaffolding snapshots
+/fyp-backend/render-backend/
+
+# Root-level helper scripts (research/prototyping)
+/*.py
+
+# Local compose (keep out of repo unless explicitly needed)
+/docker-compose.yml
+
+# Docs generated locally
+/DB_CONTRACT_*.md
