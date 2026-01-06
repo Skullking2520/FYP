@@ -14,6 +14,16 @@ import type {
   BackendPathwaySummary,
 } from "@/types/api";
 
+export class BackendRequestError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "BackendRequestError";
+    this.status = status;
+  }
+}
+
 async function backendFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (!headers.has("Content-Type") && init.body) {
@@ -86,6 +96,61 @@ export async function searchSkills(q: string): Promise<BackendSkill[]> {
 
   skillSearchCache.set(query, result);
   return result;
+}
+
+async function fetchJsonWithStatus<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(path, {
+    ...init,
+    headers: {
+      accept: "application/json",
+      ...(init.headers ?? {}),
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    let message = `Request failed with status ${response.status}`;
+    try {
+      const body = (await response.json()) as unknown;
+      if (body && typeof body === "object") {
+        const detail = (body as Record<string, unknown>).detail;
+        if (typeof detail === "string" && detail.trim()) message = detail;
+      }
+    } catch {
+      // ignore
+    }
+    throw new BackendRequestError(response.status, message);
+  }
+
+  return (await response.json()) as T;
+}
+
+export async function getSkillDetail(skill_ref: string): Promise<Partial<BackendSkill> | null> {
+  const ref = skill_ref.trim();
+  if (!ref) return null;
+
+  const params = new URLSearchParams({ skill_ref: ref });
+
+  const candidates = [
+    `/api/skills/detail?${params.toString()}`,
+    `/api/legacy/skills/detail?${params.toString()}`,
+    `/api/legacy/api/skills/detail?${params.toString()}`,
+    // Back-compat: some deployments use path params.
+    `/api/skills/${encodeURIComponent(ref)}`,
+    `/api/legacy/skills/${encodeURIComponent(ref)}`,
+    `/api/legacy/api/skills/${encodeURIComponent(ref)}`,
+  ];
+
+  let lastError: unknown = null;
+  for (const path of candidates) {
+    try {
+      return await fetchJsonWithStatus<Partial<BackendSkill>>(path, { method: "GET" });
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Failed to load skill detail");
 }
 
 export async function recommendJobs(skill_keys: string[]): Promise<BackendJobRecommendation[]> {

@@ -152,7 +152,6 @@ export default function ProfilePage() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, selectedJob, selectedMajor, skillKeys]);
 
   if (loading) {
