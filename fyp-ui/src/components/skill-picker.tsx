@@ -289,8 +289,10 @@ export function SkillPicker({ value, onChange }: Props) {
   }, [debouncedQuery]);
 
   const addSkill = (skill: BackendSkill) => {
-    if (selectedKeys.has(skill.skill_key)) return;
-    setSkills([...skills, { skill_key: skill.skill_key, name: skill.name, level: 1 }]);
+    const key = typeof skill.skill_key === "string" ? skill.skill_key.trim() : "";
+    if (!key) return;
+    if (selectedKeys.has(key)) return;
+    setSkills([...skills, { skill_key: key, name: skill.name, level: 1 }]);
     setQuery("");
     setResults([]);
     setDetailByKey({});
@@ -299,8 +301,15 @@ export function SkillPicker({ value, onChange }: Props) {
     setError(null);
   };
 
-  const removeSkill = (skill_key: string) => {
-    setSkills(skills.filter((s) => s.skill_key !== skill_key));
+  const removeSkill = (skill_key: string, index?: number) => {
+    const key = typeof skill_key === "string" ? skill_key.trim() : "";
+    if (key) {
+      setSkills(skills.filter((s) => s.skill_key !== key));
+      return;
+    }
+    if (typeof index === "number") {
+      setSkills(skills.filter((_, i) => i !== index));
+    }
   };
 
   const updateSkillLevel = (skill_key: string, level: number) => {
@@ -384,9 +393,9 @@ export function SkillPicker({ value, onChange }: Props) {
 
       <div className="flex flex-wrap gap-2">
         {skills.length === 0 && <span className="text-sm text-slate-500">No skills selected yet.</span>}
-        {skills.map((skill) => (
-          <Badge key={skill.skill_key} variant="secondary" className="gap-2">
-            <span>{formatSkillLabel(skill.name, skill.skill_key)}</span>
+        {skills.map((skill, index) => (
+          <Badge key={`${skill.skill_key || "unknown"}::${index}`} variant="secondary" className="gap-2">
+            <span>{formatSkillLabel(skill.name, skill.skill_key) || "Unknown skill"}</span>
 
             <span className="text-xs text-slate-600">Lv {skill.level}</span>
             <input
@@ -405,7 +414,7 @@ export function SkillPicker({ value, onChange }: Props) {
               variant="ghost"
               size="icon-sm"
               className="h-6 w-6 rounded-full"
-              onClick={() => removeSkill(skill.skill_key)}
+              onClick={() => removeSkill(skill.skill_key, index)}
               aria-label={`Remove ${skill.name}`}
             >
               ×

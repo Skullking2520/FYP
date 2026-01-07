@@ -3,10 +3,41 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { getProfile, loginRequest } from "@/lib/api";
 import { isAdminUserEmail } from "@/lib/admin";
+import { clearSelectedJob, clearSelectedMajor } from "@/lib/pathway-storage";
+import {
+  LAST_PATH_KEY,
+  ONBOARDING_DATA_KEY,
+  ONBOARDING_DONE_KEY,
+  ONBOARDING_LAST_STEP_KEY,
+} from "@/lib/resume";
+import { SELECTED_SKILLS_STORAGE_KEY } from "@/lib/skills-storage";
 import type { UserProfile } from "@/types/api";
 
 const TOKEN_STORAGE_KEY = "careerpath_access_token";
 const LOGIN_EMAIL_STORAGE_KEY = "careerpath_login_email";
+const PROFILE_STORAGE_KEY = "userProfile";
+
+function clearUserScopedClientStorage(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(SELECTED_SKILLS_STORAGE_KEY);
+    window.localStorage.removeItem(ONBOARDING_DATA_KEY);
+    window.localStorage.removeItem(ONBOARDING_DONE_KEY);
+    window.localStorage.removeItem(ONBOARDING_LAST_STEP_KEY);
+    window.localStorage.removeItem(LAST_PATH_KEY);
+    window.localStorage.removeItem(PROFILE_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+
+  // Stored as JSON; use the dedicated helpers.
+  try {
+    clearSelectedJob();
+    clearSelectedMajor();
+  } catch {
+    // ignore
+  }
+}
 
 function parseJwtPayload(token: string): Record<string, unknown> | null {
   const parts = token.split(".");
@@ -184,6 +215,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (email: string, password: string) => {
       setLoading(true);
       try {
+        const prevEmail = getPersistedLoginEmail();
+        const nextEmail = email.trim();
+        if (prevEmail && nextEmail && prevEmail.toLowerCase() !== nextEmail.toLowerCase()) {
+          clearUserScopedClientStorage();
+        }
+
         persistLoginEmail(email);
         const result = await loginRequest(email, password);
         persistToken(result.access_token);
@@ -193,10 +230,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setLoading(false);
       }
     },
-    [persistToken, refreshProfile, persistLoginEmail],
+    [persistToken, refreshProfile, persistLoginEmail, getPersistedLoginEmail],
   );
 
   const logout = useCallback(() => {
+    clearUserScopedClientStorage();
     persistToken(null);
     persistLoginEmail(null);
     setToken(null);

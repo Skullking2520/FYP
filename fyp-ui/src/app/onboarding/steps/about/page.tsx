@@ -133,7 +133,7 @@ export default function AboutStep() {
       }
 
       setJobSuggestionsLoading(true);
-      searchJobs(q, 20)
+      searchJobs(q, 20, token)
         .then((items) => {
           if (cancelled) return;
           const titles = Array.isArray(items)
@@ -157,7 +157,7 @@ export default function AboutStep() {
       cancelled = true;
       window.clearTimeout(handle);
     };
-  }, [target]);
+  }, [target, token]);
 
   return (
     <div>
