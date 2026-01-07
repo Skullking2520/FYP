@@ -133,7 +133,7 @@ export default function AboutStep() {
       }
 
       setJobSuggestionsLoading(true);
-      searchJobs(q, 20, token)
+      searchJobs(q, 30, token)
         .then((items) => {
           if (cancelled) return;
           const titles = Array.isArray(items)
@@ -141,7 +141,7 @@ export default function AboutStep() {
                 .map((j) => (typeof j?.title === "string" ? j.title.trim() : ""))
                 .filter((t) => t.length > 0)
             : [];
-          setJobSuggestions(Array.from(new Set(titles)).slice(0, 8));
+          setJobSuggestions(Array.from(new Set(titles)).slice(0, 12));
         })
         .catch(() => {
           if (cancelled) return;
