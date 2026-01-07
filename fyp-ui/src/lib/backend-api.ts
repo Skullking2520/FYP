@@ -161,17 +161,20 @@ export async function recommendJobs(skill_keys: string[]): Promise<BackendJobRec
   });
 }
 
-export async function searchJobs(query: string, top_k = 20): Promise<BackendJobSearchResult[]> {
+export async function searchJobs(query: string, top_k = 20, token?: string | null): Promise<BackendJobSearchResult[]> {
   const q = query.trim();
   if (!q) return [];
 
   const safeTopK = Math.max(1, Math.min(50, Math.floor(top_k)));
-  const cacheKey = `${q}::${safeTopK}`;
+  const cacheKey = `${q}::${safeTopK}::${token ? "auth" : "anon"}`;
   const cached = jobSearchCache.get(cacheKey);
   if (cached) return cached;
 
   const paramsQ = new URLSearchParams({ q, top_k: String(safeTopK) });
   const paramsName = new URLSearchParams({ name: q, top_k: String(safeTopK) });
+
+  const headers = new Headers();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
 
   const result = await backendFetchWithFallback<BackendJobSearchResult[]>(
     [
@@ -186,7 +189,7 @@ export async function searchJobs(query: string, top_k = 20): Promise<BackendJobS
       `/api/legacy/jobs/search?${paramsQ.toString()}`,
       `/api/legacy/jobs/search?${paramsName.toString()}`,
     ],
-    { method: "GET" },
+    { method: "GET", headers },
   );
 
   const normalized = Array.isArray(result) ? result : [];

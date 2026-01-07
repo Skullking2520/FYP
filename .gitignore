@@ -1,0 +1,30 @@
+# Repo-root ignores (datasets / notebooks / local artifacts)
+
+# Jupyter
+*.ipynb
+.ipynb_checkpoints/
+
+# Local databases / dumps
+*.db
+
+# Archives
+*.zip
+
+# Large datasets / exports
+*.csv
+*.xlsx
+
+# Local folders that should not be versioned
+Model/
+ml/
+_tmp_backend_repo/
+preprocessing_db/
+db_30_0_excel/
+fyp-db/
+
+# ESCO data dumps
+ESCO dataset*/
+ESCO_*.csv
+
+# Backups / temp
+.git_backup_*/
