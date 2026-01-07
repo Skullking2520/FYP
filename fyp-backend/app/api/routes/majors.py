@@ -14,9 +14,6 @@ from app.services.ml_recommender import MLAssets
 router = APIRouter(tags=["majors"])
 
 
-_PROGRAMS_ENDPOINT_MARKER = "majors-programs-fallback-2025-12-25"
-
-
 _OCC_URI_RE = re.compile(r"^https?://data\.europa\.eu/esco/occupation/[0-9a-fA-F-]{36}$")
 
 

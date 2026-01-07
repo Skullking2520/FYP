@@ -1,6 +1,6 @@
 # FYP FastAPI Backend
 
-Production-style FastAPI backend for the AI-driven career counseling project. It currently supports user registration/login, protected profile management, NLP-driven skill extraction, and recommendation endpoints for jobs and majors.
+FastAPI backend for the career counseling project. It supports user registration/login, protected profile management, skill extraction, and recommendation endpoints for jobs and majors.
 
 ## Tech Stack
 
@@ -43,22 +43,22 @@ Note:
 
 ## Local Development
 
-### 0) MySQL (권장: Docker)
+### 0) MySQL (Recommended: Docker)
 
-워크스페이스 루트에 있는 `docker-compose.yml`로 MySQL을 바로 띄울 수 있습니다.
+You can start MySQL using the workspace root `docker-compose.yml`.
 
 ```bash
 cd ..
 docker compose up -d mysql
 ```
 
-기본값:
+Defaults:
 
 - MySQL: `localhost:3306`
 - `root/root`
 - DB: `fyp_careerpath`
 
-초기 스키마(빈 테이블)는 자동으로 생성됩니다: `fyp-db/init/*.sql`
+The initial schema (empty tables) is created automatically from `fyp-db/init/*.sql`.
 
 1. Create and activate a virtual environment.
 
@@ -158,17 +158,17 @@ set DB_URL=sqlite:///./test.db
 pytest
 ```
 
-## Share via ZIP (친구에게 테스트용 전달)
+## Share via ZIP
 
-PowerShell에서 아래를 실행하면, 가상환경/캐시/.env 및 (기본값) 대용량 모델 폴더(`app/nlp`)를 제외한 ZIP을 생성합니다.
+From PowerShell, you can create a ZIP that excludes the virtualenv/cache files and `.env` (and, by default, the large model folder `app/nlp`).
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/make_zip.ps1
 ```
 
-출력 ZIP 위치: `dist/`
+Output ZIP location: `dist/`
 
-모델까지 포함해야 하면:
+To include models:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/make_zip.ps1 -IncludeModels

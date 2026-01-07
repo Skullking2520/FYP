@@ -133,19 +133,16 @@ def config_debug():
         pass
 
     majors_module_file = None
-    majors_programs_marker = None
     try:
         import sys
 
         majors_module = sys.modules.get("app.api.routes.majors")
         if majors_module is not None:
             majors_module_file = getattr(majors_module, "__file__", None)
-            majors_programs_marker = getattr(majors_module, "_PROGRAMS_ENDPOINT_MARKER", None)
     except Exception:
         pass
 
     return {
-        "debug_marker": "health-config-v3",
         "environment": settings.environment,
         "debug": settings.debug,
         "api_prefix": settings.api_prefix,
@@ -153,7 +150,6 @@ def config_debug():
         "orm_db_url": masked,
         "health_module_file": health_module_file,
         "majors_module_file": majors_module_file,
-        "majors_programs_marker": majors_programs_marker,
         "mysql_current_user": mysql_user,
         "mysql_database": mysql_db,
         "diag_major10_distinct_skillUri": derived_major10_skills,
