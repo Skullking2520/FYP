@@ -176,7 +176,7 @@ export async function searchJobs(query: string, top_k = 20, token?: string | nul
   const headers = new Headers();
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
-  const result = await backendFetchWithFallback<BackendJobSearchResult[]>(
+  const result = await backendFetchWithFallback<unknown>(
     [
       `/api/jobs/search?${paramsQ.toString()}`,
       `/api/jobs/search?${paramsName.toString()}`,
@@ -192,7 +192,28 @@ export async function searchJobs(query: string, top_k = 20, token?: string | nul
     { method: "GET", headers },
   );
 
-  const normalized = Array.isArray(result) ? result : [];
+  const rows = coerceArrayResponse<Record<string, unknown>>(result, ["items", "results", "data", "jobs"]);
+  const normalized = rows.reduce<BackendJobSearchResult[]>((acc, row) => {
+    const job_id = row["job_id"] ?? row["id"] ?? row["jobId"];
+    const title = row["title"] ?? row["job_title"] ?? row["name"] ?? row["jobTitle"];
+    if (typeof title !== "string") return acc;
+    if (typeof job_id !== "string" && typeof job_id !== "number") return acc;
+    const t = title.trim();
+    if (!t) return acc;
+
+    acc.push({
+      job_id,
+      title: t,
+      job_ref: typeof row["job_ref"] === "string" ? row["job_ref"] : undefined,
+      esco_uri: typeof row["esco_uri"] === "string" ? row["esco_uri"] : undefined,
+      occupation_uid: typeof row["occupation_uid"] === "string" ? row["occupation_uid"] : undefined,
+      onet_soc_code: typeof row["onet_soc_code"] === "string" ? row["onet_soc_code"] : undefined,
+      source: typeof row["source"] === "string" ? row["source"] : undefined,
+    });
+
+    return acc;
+  }, []);
+
   jobSearchCache.set(cacheKey, normalized);
   return normalized;
 }
