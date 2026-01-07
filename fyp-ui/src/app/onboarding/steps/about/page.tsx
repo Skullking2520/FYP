@@ -35,6 +35,7 @@ export default function AboutStep() {
 
   const [jobSuggestions, setJobSuggestions] = useState<string[]>([]);
   const [jobSuggestionsLoading, setJobSuggestionsLoading] = useState(false);
+  const [jobSuggestionsError, setJobSuggestionsError] = useState<string | null>(null);
 
   const [extracting, setExtracting] = useState(false);
   const [extractError, setExtractError] = useState<string | null>(null);
@@ -129,10 +130,12 @@ export default function AboutStep() {
       if (q.length < 2) {
         setJobSuggestions([]);
         setJobSuggestionsLoading(false);
+        setJobSuggestionsError(null);
         return;
       }
 
       setJobSuggestionsLoading(true);
+      setJobSuggestionsError(null);
       searchJobs(q, 30, token)
         .then((items) => {
           if (cancelled) return;
@@ -143,9 +146,11 @@ export default function AboutStep() {
             : [];
           setJobSuggestions(Array.from(new Set(titles)).slice(0, 12));
         })
-        .catch(() => {
+        .catch((err) => {
           if (cancelled) return;
           setJobSuggestions([]);
+          const message = err instanceof Error ? err.message : "Job search failed";
+          setJobSuggestionsError(message);
         })
         .finally(() => {
           if (cancelled) return;
@@ -177,6 +182,14 @@ export default function AboutStep() {
 
             {jobSuggestionsLoading && (
               <div className="text-xs text-slate-500 px-1">Searching…</div>
+            )}
+
+            {!jobSuggestionsLoading && jobSuggestionsError && (
+              <div className="text-xs text-red-600 px-1">{jobSuggestionsError}</div>
+            )}
+
+            {!jobSuggestionsLoading && !jobSuggestionsError && target.trim().length >= 2 && jobSuggestions.length === 0 && (
+              <div className="text-xs text-slate-500 px-1">No results</div>
             )}
 
             {jobSuggestions.length > 0 && (
