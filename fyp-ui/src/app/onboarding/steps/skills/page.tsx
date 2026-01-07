@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SkillPicker, type SelectedSkill } from "@/components/skill-picker";
 import { Progress } from "../../_components/Progress";
 import { StepNav } from "../../_components/StepNav";
@@ -35,8 +35,10 @@ function buildPrefillQueries(params: {
 export default function SkillsStep() {
   const { data } = useOnboarding();
   const [selectedSkills, setSelectedSkills] = useState<SelectedSkill[]>(() => loadSelectedSkillsFromStorage());
+  const userEditedSkillsRef = useRef(false);
 
   useEffect(() => {
+    if (userEditedSkillsRef.current) return;
     const extracted = Array.isArray(data.about.extractedSkills) ? data.about.extractedSkills : [];
     if (extracted.length === 0) return;
 
@@ -55,7 +57,7 @@ export default function SkillsStep() {
       }),
     )
       .then((hits) => {
-        if (cancelled) return;
+        if (cancelled || userEditedSkillsRef.current) return;
         setSelectedSkills((prev) => {
           const byKey = new Map<string, SelectedSkill>();
           for (const s of prev) byKey.set(s.skill_key, s);
@@ -83,6 +85,7 @@ export default function SkillsStep() {
   }, [selectedSkills]);
 
   useEffect(() => {
+    if (userEditedSkillsRef.current) return;
     if (selectedSkills.length > 0) return;
 
     let cancelled = false;
@@ -202,7 +205,13 @@ export default function SkillsStep() {
           </div>
         </div>
 
-        <SkillPicker value={selectedSkills} onChange={setSelectedSkills} />
+        <SkillPicker
+          value={selectedSkills}
+          onChange={(next) => {
+            userEditedSkillsRef.current = true;
+            setSelectedSkills(next);
+          }}
+        />
       </div>
 
       <StepNav

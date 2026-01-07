@@ -5,17 +5,8 @@ import { useOnboarding } from "../../_components/OnboardingProvider";
 import { Progress } from "../../_components/Progress";
 import { StepNav } from "../../_components/StepNav";
 import { useAuth } from "@/components/auth-provider";
-import { extractSkillsFromText } from "@/lib/backend-api";
+import { extractSkillsFromText, searchJobs } from "@/lib/backend-api";
 import type { SkillReference } from "@/types/api";
-
-const JOB_OPTIONS = [
-  "Data Scientist",
-  "ML Engineer",
-  "Software Engineer",
-  "Security Analyst",
-  "Game Developer",
-  "IT Analyst",
-] as const;
 
 export default function AboutStep() {
   const { data, setData } = useOnboarding();
@@ -41,6 +32,9 @@ export default function AboutStep() {
   const [target, setTarget] = useState<string>("");
   const [targetJob, setTargetJob] = useState<string>(data.career.targetJobs[0] ?? "");
   const [notes, setNotes] = useState<string>(data.career.notes);
+
+  const [jobSuggestions, setJobSuggestions] = useState<string[]>([]);
+  const [jobSuggestionsLoading, setJobSuggestionsLoading] = useState(false);
 
   const [extracting, setExtracting] = useState(false);
   const [extractError, setExtractError] = useState<string | null>(null);
@@ -126,10 +120,44 @@ export default function AboutStep() {
   };
   const clearTarget = () => setTargetJob("");
 
-  const normalizedQuery = target.trim().toLowerCase();
-  const suggestions = normalizedQuery
-    ? JOB_OPTIONS.filter((title) => title.toLowerCase().includes(normalizedQuery)).slice(0, 8)
-    : [];
+  useEffect(() => {
+    const q = target.trim();
+    let cancelled = false;
+    const handle = window.setTimeout(() => {
+      if (cancelled) return;
+
+      if (q.length < 2) {
+        setJobSuggestions([]);
+        setJobSuggestionsLoading(false);
+        return;
+      }
+
+      setJobSuggestionsLoading(true);
+      searchJobs(q, 20)
+        .then((items) => {
+          if (cancelled) return;
+          const titles = Array.isArray(items)
+            ? items
+                .map((j) => (typeof j?.title === "string" ? j.title.trim() : ""))
+                .filter((t) => t.length > 0)
+            : [];
+          setJobSuggestions(Array.from(new Set(titles)).slice(0, 8));
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setJobSuggestions([]);
+        })
+        .finally(() => {
+          if (cancelled) return;
+          setJobSuggestionsLoading(false);
+        });
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [target]);
 
   return (
     <div>
@@ -147,9 +175,13 @@ export default function AboutStep() {
               onChange={(e) => setTarget(e.target.value)}
             />
 
-            {suggestions.length > 0 && (
+            {jobSuggestionsLoading && (
+              <div className="text-xs text-slate-500 px-1">Searching…</div>
+            )}
+
+            {jobSuggestions.length > 0 && (
               <div className="rounded-xl border bg-white overflow-hidden">
-                {suggestions.map((title) => (
+                {jobSuggestions.map((title) => (
                   <button
                     key={title}
                     type="button"
