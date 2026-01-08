@@ -5,8 +5,8 @@ import { SkillPicker, type SelectedSkill } from "@/components/skill-picker";
 import { Progress } from "../../_components/Progress";
 import { StepNav } from "../../_components/StepNav";
 import { useOnboarding } from "../../_components/OnboardingProvider";
-import { loadSelectedSkillsFromStorage, saveSelectedSkillsToStorage } from "@/lib/skills-storage";
-import { searchSkills } from "@/lib/backend-api";
+import { formatSkillLabel, loadSelectedSkillsFromStorage, saveSelectedSkillsToStorage } from "@/lib/skills-storage";
+import { getSkillDetail, searchSkills } from "@/lib/backend-api";
 
 const ONBOARDING_DONE_KEY = "onboarding_completed_v1";
 
@@ -64,8 +64,13 @@ export default function SkillsStep() {
 
           for (const hit of hits) {
             if (!hit) continue;
+            if (!hit.skill_key || !String(hit.skill_key).trim()) continue;
             if (byKey.has(hit.skill_key)) continue;
-            byKey.set(hit.skill_key, { skill_key: hit.skill_key, name: hit.name, level: 1 });
+            const name =
+              typeof hit.name === "string" && hit.name.trim()
+                ? hit.name.trim()
+                : formatSkillLabel("", hit.skill_key) || "Unknown skill";
+            byKey.set(hit.skill_key, { skill_key: hit.skill_key, name, level: 1 });
           }
 
           return Array.from(byKey.values());
@@ -132,9 +137,18 @@ export default function SkillsStep() {
           const exact = results.find((s) => s.skill_key === skill_key);
           const byName = results.find((s) => s.name.toLowerCase() === q.toLowerCase());
           const hit = exact ?? byName ?? null;
-          return { skill_key, name: hit?.name ?? skill_key, level } satisfies SelectedSkill;
+          if (hit?.name && hit.name.trim()) {
+            return { skill_key, name: hit.name.trim(), level } satisfies SelectedSkill;
+          }
+
+          // Fallback: some skill_key values are ESCO URIs or codes; try detail.
+          const detail = await getSkillDetail(skill_key);
+          const detailName = typeof detail?.name === "string" ? detail.name.trim() : "";
+          const name = detailName || formatSkillLabel("", skill_key) || "Unknown skill";
+          return { skill_key, name, level } satisfies SelectedSkill;
         } catch {
-          return { skill_key, name: skill_key, level } satisfies SelectedSkill;
+          const name = formatSkillLabel("", skill_key) || "Unknown skill";
+          return { skill_key, name, level } satisfies SelectedSkill;
         }
       }),
       ...nameQueries.map(async (q) => {
@@ -143,6 +157,7 @@ export default function SkillsStep() {
           const exact = results.find((s) => s.name.toLowerCase() === q.toLowerCase());
           const hit = exact ?? results[0] ?? null;
           if (!hit) return null;
+          if (!hit.skill_key || !String(hit.skill_key).trim()) return null;
           return { skill_key: hit.skill_key, name: hit.name, level: 1 } satisfies SelectedSkill;
         } catch {
           return null;
@@ -154,6 +169,7 @@ export default function SkillsStep() {
         const nextByKey = new Map<string, SelectedSkill>();
         for (const item of items) {
           if (!item) continue;
+          if (!item.skill_key || !item.skill_key.trim()) continue;
           const prev = nextByKey.get(item.skill_key);
           if (!prev || item.level > prev.level) nextByKey.set(item.skill_key, item);
         }

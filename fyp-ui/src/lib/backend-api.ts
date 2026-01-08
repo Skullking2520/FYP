@@ -82,22 +82,6 @@ function coerceArrayResponse<T>(value: unknown, candidateKeys: string[]): T[] {
 const skillSearchCache = new Map<string, BackendSkill[]>();
 const jobSearchCache = new Map<string, BackendJobSearchResult[]>();
 
-export async function searchSkills(q: string): Promise<BackendSkill[]> {
-  const query = q.trim();
-  if (!query) return [];
-
-  const cached = skillSearchCache.get(query);
-  if (cached) return cached;
-
-  const params = new URLSearchParams({ q: query });
-  const result = await backendFetch<BackendSkill[]>(`/api/skills/search?${params.toString()}`, {
-    method: "GET",
-  });
-
-  skillSearchCache.set(query, result);
-  return result;
-}
-
 async function fetchJsonWithStatus<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
     ...init,
@@ -151,6 +135,22 @@ export async function getSkillDetail(skill_ref: string): Promise<Partial<Backend
   }
 
   throw lastError instanceof Error ? lastError : new Error("Failed to load skill detail");
+}
+
+export async function searchSkills(q: string): Promise<BackendSkill[]> {
+  const query = q.trim();
+  if (!query) return [];
+
+  const cached = skillSearchCache.get(query);
+  if (cached) return cached;
+
+  const params = new URLSearchParams({ q: query });
+  const result = await backendFetch<BackendSkill[]>(`/api/skills/search?${params.toString()}`, {
+    method: "GET",
+  });
+
+  skillSearchCache.set(query, result);
+  return result;
 }
 
 export async function recommendJobs(skill_keys: string[]): Promise<BackendJobRecommendation[]> {
@@ -210,7 +210,6 @@ export async function searchJobs(query: string, top_k = 20, token?: string | nul
       onet_soc_code: typeof row["onet_soc_code"] === "string" ? row["onet_soc_code"] : undefined,
       source: typeof row["source"] === "string" ? row["source"] : undefined,
     });
-
     return acc;
   }, []);
 
