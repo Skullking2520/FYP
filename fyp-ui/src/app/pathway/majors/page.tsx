@@ -4,7 +4,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { getJobMajors, getMajorPrograms } from "@/lib/backend-api";
+import { useAuth } from "@/components/auth-provider";
+import { updateProfile } from "@/lib/api";
 import { clearSelectedMajor, loadSelectedJob, saveSelectedMajor } from "@/lib/pathway-storage";
+import { buildLocalProfileUpdatePayload } from "@/lib/resume";
 import type { BackendMajorProgramRanking, BackendMajorRecommendation } from "@/types/api";
 
 function formatScore(score: unknown): string {
@@ -19,6 +22,7 @@ function formatScore(score: unknown): string {
 
 export default function PathwayMajorsPage() {
   const router = useRouter();
+  const { token } = useAuth();
 
   const initialJob = typeof window === "undefined" ? null : loadSelectedJob();
   const [jobId] = useState<string | null>(() => initialJob?.job_id ?? null);
@@ -171,6 +175,12 @@ export default function PathwayMajorsPage() {
                       className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
                       onClick={() => {
                         saveSelectedMajor({ major_id: majorId, major_name: major.major_name });
+                        if (token) {
+                          const payload = buildLocalProfileUpdatePayload();
+                          void updateProfile(token, payload).catch((err) => {
+                            console.warn("Failed to persist profile", err);
+                          });
+                        }
                         router.push("/pathway/plan");
                       }}
                     >

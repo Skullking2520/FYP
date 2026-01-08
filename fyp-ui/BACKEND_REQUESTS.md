@@ -92,3 +92,47 @@ This document captures backend-side changes that would make the UI reliable and 
 
 - Request: `{ "user_text": "..." }`
 - Response: `{ "skills": [{"skill_name":"machine learning","skill_id":"..."}] }`
+
+## 6) Skill search should return category/difficulty (and respect query)
+
+**Problem**
+
+- The UI currently displays `Category` and `Difficulty` filters, but today those values come from a frontend static mapping (`skill-meta`).
+- As a result, most skills show as `General • unknown` and filters only contain `All`.
+- Also, some deployments appear to ignore the query param (`q`), returning effectively an unfiltered list.
+
+**Request**
+
+- Ensure `GET /api/skills/search` reliably filters by the query.
+  - Accept `q` as the query param (preferred). If the backend uses a different param name (`query`/`name`), please add an alias so `q` works.
+- Include skill classification fields in the response so the UI can show real filters.
+
+**Observed behavior (from production)**
+
+- Calling `GET /api/skills/search?q=ch` returned an apparently unfiltered, alphabetically ordered list (e.g. `3D...`, `ABAP`, `accounting`, `achieve sales targets`, ...), with `description: null` and `dimension: null` for all items.
+- This strongly suggests the backend is **ignoring the query param** (or using a different param name) and returning the default dataset page.
+
+**Concrete backend ask (copy/paste)**
+
+Please make `GET /api/skills/search` behave as a real search endpoint:
+
+- Query param: support `q` (alias any existing `query`/`name` to `q`).
+- Filtering: results must be filtered by the query (at least substring match server-side), not a default page.
+- Payload: include a non-null description field when available (ESCO has `description`/`definition`/`scope note`), and include classification fields needed by UI:
+  - `description` (or `definition` / `scope_note`)
+  - `category` (string)
+  - `difficulty` (string or number)
+
+**Suggested response fields per item**
+
+```json
+{
+  "skill_key": "...",
+  "name": "...",
+  "description": "...",
+  "category": "Technical",
+  "difficulty": "Intermediate"
+}
+```
+
+If the backend uses numeric difficulty, the UI can map it, but we need a stable field.

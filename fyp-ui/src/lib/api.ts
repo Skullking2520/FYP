@@ -21,38 +21,43 @@ import { suggestJobsBySkills } from "./match";
 
 const LEGACY_API_PREFIX = "/api/legacy";
 
-async function apiFetchV2<T>(path: string, init: RequestInit = {}, token?: string | null): Promise<T> {
-  // /api/* is proxied to upstream /api/*
-  const url = `/api${path}`;
-  const headers = new Headers(init.headers);
-  if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-  if (token) headers.set("Authorization", `Bearer ${token}`);
+export class ApiError extends Error {
+  status: number;
+  detail?: unknown;
 
-  const response = await fetch(url, {
-    ...init,
-    headers,
-    cache: "no-store",
-  });
+  constructor(message: string, status: number, detail?: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.detail = detail;
+  }
+}
 
-  if (!response.ok) {
-    let message = `Request failed with status ${response.status}`;
-    try {
-      const errorBody = await response.json();
-      if (typeof errorBody?.detail === "string") message = errorBody.detail;
-    } catch {
-      // ignore
-    }
-    throw new Error(message);
+function normalizeLegacyPath(path: string): string {
+  const trimmed = path.trim();
+  if (!trimmed) return "/";
+
+  let next = trimmed;
+
+  // Allow callers to pass full frontend paths; normalize to backend path.
+  if (next.startsWith(LEGACY_API_PREFIX)) {
+    next = next.slice(LEGACY_API_PREFIX.length);
+  }
+  if (next.startsWith("/api")) {
+    next = next.slice("/api".length);
   }
 
-  if (response.status === 204) return undefined as T;
-  return (await response.json()) as T;
+  if (!next.startsWith("/")) {
+    next = `/${next}`;
+  }
+
+  return next || "/";
 }
 
 async function apiFetch<T>(path: string, init: RequestInit = {}, token?: string | null): Promise<T> {
-  const url = `${LEGACY_API_PREFIX}${path}`;
+  const url = `${LEGACY_API_PREFIX}${normalizeLegacyPath(path)}`;
   const headers = new Headers(init.headers);
-  headers.set("Content-Type", "application/json");
+  if (!headers.has("Content-Type") && init.body) headers.set("Content-Type", "application/json");
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
@@ -65,15 +70,20 @@ async function apiFetch<T>(path: string, init: RequestInit = {}, token?: string 
 
   if (!response.ok) {
     let message = `Request failed with status ${response.status}`;
+    let detail: unknown = undefined;
     try {
-      const errorBody = await response.json();
-      if (typeof errorBody?.detail === "string") {
-        message = errorBody.detail;
+      const errorBody = (await response.json()) as unknown;
+      detail = errorBody;
+      if (errorBody && typeof errorBody === "object" && "detail" in errorBody) {
+        const maybeDetail = (errorBody as Record<string, unknown>).detail;
+        if (typeof maybeDetail === "string" && maybeDetail.trim()) {
+          message = maybeDetail;
+        }
       }
     } catch (error) {
       console.error("Failed to parse error response", error);
     }
-    throw new Error(message);
+    throw new ApiError(message, response.status, detail);
   }
 
   if (response.status === 204) {
@@ -137,45 +147,26 @@ export async function getProfile(token: string): Promise<RemoteUserProfile> {
     return p as unknown as RemoteUserProfile;
   };
 
-  // Prefer the newer /api/users/me (typically includes is_admin for allowlisted users).
-  try {
-    const profile = await apiFetchV2<unknown>("/users/me", { method: "GET" }, token);
-    return normalizeAdmin(profile);
-  } catch {
-    const profile = await apiFetch<unknown>("/users/me", { method: "GET" }, token);
-    return normalizeAdmin(profile);
-  }
+  // Legacy contract: /users/me (proxied via /api/legacy/users/me)
+  const profile = await apiFetch<unknown>("/users/me", { method: "GET" }, token);
+  return normalizeAdmin(profile);
 }
 
 export type ProfileUpdatePayload = {
   name?: string | null;
-  age?: number | null;
-  country?: string | null;
   interests_text?: string | null;
   skills_text?: string | null;
 };
 
 export async function updateProfile(token: string, payload: ProfileUpdatePayload): Promise<RemoteUserProfile> {
-  // Prefer /api/users/me (server contract), fallback to legacy.
-  try {
-    return await apiFetchV2<RemoteUserProfile>(
-      "/users/me",
-      {
-        method: "PUT",
-        body: JSON.stringify(payload),
-      },
-      token,
-    );
-  } catch {
-    return apiFetch<RemoteUserProfile>(
-      "/users/me",
-      {
-        method: "PUT",
-        body: JSON.stringify(payload),
-      },
-      token,
-    );
-  }
+  return apiFetch<RemoteUserProfile>(
+    "/users/me",
+    {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    },
+    token,
+  );
 }
 
 export async function extractSkills(user_text: string, token?: string | null): Promise<SkillExtractionResponse> {
@@ -195,6 +186,82 @@ export type RecommendationRequest = {
   interests_text?: string;
   skills_text?: string;
 };
+
+export type SelectedJobPayload = {
+  job_id: string | number;
+  job_title: string;
+  recommendation_id?: string | number | null;
+};
+
+export async function setSelectedJob(token: string, payload: SelectedJobPayload): Promise<void> {
+  await apiFetch<unknown>(
+    "/users/me/selected-job",
+    {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    },
+    token,
+  );
+}
+
+export type StructuredSkillPayload = {
+  skill_key: string;
+  level: number;
+};
+
+export type StructuredProfileUpdatePayload = {
+  skills: StructuredSkillPayload[];
+};
+
+export type StructuredProfileResponse = {
+  skills?: StructuredSkillPayload[] | null;
+};
+
+function coerceStructuredSkills(raw: unknown): StructuredSkillPayload[] {
+  const unwrap = (v: unknown): unknown => {
+    if (!v || typeof v !== "object") return v;
+    const r = v as Record<string, unknown>;
+    return (r.value && typeof r.value === "object" ? r.value : null) ?? (r.data && typeof r.data === "object" ? r.data : null) ?? v;
+  };
+
+  const candidate = unwrap(raw);
+  if (!candidate || typeof candidate !== "object") return [];
+  const record = candidate as Record<string, unknown>;
+  const inner = (record.profile && typeof record.profile === "object" ? (record.profile as Record<string, unknown>) : null) ?? record;
+  const skills = (inner as Record<string, unknown>).skills;
+  if (!Array.isArray(skills)) return [];
+  return skills
+    .map((s) => {
+      if (!s || typeof s !== "object") return null;
+      const sr = s as Record<string, unknown>;
+      const skill_key = typeof sr.skill_key === "string" ? sr.skill_key.trim() : String(sr.skill_key ?? "").trim();
+      const level = typeof sr.level === "number" && Number.isFinite(sr.level) ? sr.level : Number(sr.level ?? 0);
+      if (!skill_key) return null;
+      return { skill_key, level } satisfies StructuredSkillPayload;
+    })
+    .filter((x): x is StructuredSkillPayload => Boolean(x));
+}
+
+export async function getStructuredProfile(token: string): Promise<StructuredProfileResponse> {
+  const raw = await apiFetch<unknown>("/users/me/profile", { method: "GET" }, token);
+  return { skills: coerceStructuredSkills(raw) };
+}
+
+export async function updateStructuredProfile(
+  token: string,
+  payload: StructuredProfileUpdatePayload,
+  init: RequestInit = {},
+): Promise<void> {
+  await apiFetch<unknown>(
+    "/users/me/profile",
+    {
+      method: "PUT",
+      body: JSON.stringify(payload),
+      ...init,
+    },
+    token,
+  );
+}
 
 export async function getJobRecommendations(
   token: string,

@@ -1,43 +1,12 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { getProfile, loginRequest } from "@/lib/api";
+import { ApiError, getProfile, loginRequest } from "@/lib/api";
 import { isAdminUserEmail } from "@/lib/admin";
-import { clearSelectedJob, clearSelectedMajor } from "@/lib/pathway-storage";
-import {
-  LAST_PATH_KEY,
-  ONBOARDING_DATA_KEY,
-  ONBOARDING_DONE_KEY,
-  ONBOARDING_LAST_STEP_KEY,
-} from "@/lib/resume";
-import { SELECTED_SKILLS_STORAGE_KEY } from "@/lib/skills-storage";
 import type { UserProfile } from "@/types/api";
 
 const TOKEN_STORAGE_KEY = "careerpath_access_token";
 const LOGIN_EMAIL_STORAGE_KEY = "careerpath_login_email";
-const PROFILE_STORAGE_KEY = "userProfile";
-
-function clearUserScopedClientStorage(): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.removeItem(SELECTED_SKILLS_STORAGE_KEY);
-    window.localStorage.removeItem(ONBOARDING_DATA_KEY);
-    window.localStorage.removeItem(ONBOARDING_DONE_KEY);
-    window.localStorage.removeItem(ONBOARDING_LAST_STEP_KEY);
-    window.localStorage.removeItem(LAST_PATH_KEY);
-    window.localStorage.removeItem(PROFILE_STORAGE_KEY);
-  } catch {
-    // ignore
-  }
-
-  // Stored as JSON; use the dedicated helpers.
-  try {
-    clearSelectedJob();
-    clearSelectedMajor();
-  } catch {
-    // ignore
-  }
-}
 
 function parseJwtPayload(token: string): Record<string, unknown> | null {
   const parts = token.split(".");
@@ -77,25 +46,18 @@ function hasAdminClaim(payload: Record<string, unknown> | null): boolean {
 }
 
 async function probeAdminAccess(token: string): Promise<boolean> {
-  const paths = ["/api/admin/stats", "/api/legacy/admin/stats", "/api/legacy/api/admin/stats"];
-  let sawAuthFailure = false;
-  for (const path of paths) {
-    try {
-      const res = await fetch(path, {
-        method: "GET",
-        headers: { Authorization: `Bearer ${token}` },
-        cache: "no-store",
-      });
-      if (res.ok) return true;
-      if (res.status === 401 || res.status === 403) {
-        sawAuthFailure = true;
-        continue;
-      }
-    } catch {
-      // ignore and try next path
-    }
+  try {
+    const res = await fetch("/api/legacy/admin/stats", {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+    if (res.ok) return true;
+    // 401/403 are expected for non-admin users; treat as "not admin".
+    return false;
+  } catch {
+    return false;
   }
-  return sawAuthFailure ? false : false;
 }
 
 type AuthContextValue = {
@@ -163,7 +125,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           email:
             typeof profile?.email === "string" && profile.email.trim().length > 0
               ? profile.email
-              : loginEmail ?? emailFromJwt ?? (profile?.email as any),
+              : loginEmail ?? emailFromJwt ?? "",
         };
 
         // If env allowlist marks this email as admin, reflect it in the user object
@@ -180,10 +142,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(merged);
         return merged;
       } catch (error) {
-        console.error("Failed to refresh profile", error);
-        persistToken(null);
-        setToken(null);
-        setUser(null);
+        // Important: don't wipe a valid session on transient failures (network hiccups, 5xx).
+        // Only clear the token when backend explicitly rejects it.
+        const status = error instanceof ApiError ? error.status : null;
+        if (status === 401 || status === 403) {
+          console.warn("Session expired/unauthorized; clearing token", error);
+          persistToken(null);
+          setToken(null);
+          setUser(null);
+          return null;
+        }
+
+        console.warn("Failed to refresh profile (keeping session)", error);
         return null;
       }
     },
@@ -215,26 +185,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (email: string, password: string) => {
       setLoading(true);
       try {
-        const prevEmail = getPersistedLoginEmail();
-        const nextEmail = email.trim();
-        if (prevEmail && nextEmail && prevEmail.toLowerCase() !== nextEmail.toLowerCase()) {
-          clearUserScopedClientStorage();
-        }
-
         persistLoginEmail(email);
         const result = await loginRequest(email, password);
         persistToken(result.access_token);
         setToken(result.access_token);
-        await refreshProfile(result.access_token);
+        const refreshed = await refreshProfile(result.access_token);
+        if (!refreshed) {
+          throw new Error("Signed in but failed to load profile");
+        }
+      } catch (error) {
+        if (error instanceof ApiError) {
+          // Common auth failures: show a clear message on the login form.
+          if (error.status === 401 || error.status === 403) {
+            throw new Error("Invalid email or password");
+          }
+          if (error.status === 404) {
+            throw new Error("Account not found");
+          }
+          if (error.message && error.message.trim()) {
+            throw new Error(error.message);
+          }
+          throw new Error(`Failed to sign in (status ${error.status})`);
+        }
+        throw error;
       } finally {
         setLoading(false);
       }
     },
-    [persistToken, refreshProfile, persistLoginEmail, getPersistedLoginEmail],
+    [persistToken, refreshProfile, persistLoginEmail],
   );
 
   const logout = useCallback(() => {
-    clearUserScopedClientStorage();
     persistToken(null);
     persistLoginEmail(null);
     setToken(null);

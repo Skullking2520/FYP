@@ -8,8 +8,6 @@ export type UserProfile = {
   email: string;
   is_admin?: boolean | null;
   name?: string | null;
-  age?: number | null;
-  country?: string | null;
   interests_text?: string | null;
   skills_text?: string | null;
 };
@@ -18,8 +16,6 @@ export type RegisterPayload = {
   email: string;
   password: string;
   name?: string;
-  age?: number;
-  country?: string;
 };
 
 export type JobRecommendation = {
@@ -62,6 +58,22 @@ export type BackendSkill = {
   name: string;
   source?: string | null;
   dimension?: string | null;
+  // Optional fields (backend-dependent). If present, used for richer UI.
+  description?: string | null;
+  definition?: string | null;
+};
+
+// 6) GET /api/skills/resolve?skill_key=...
+//    POST /api/skills/resolve { skill_keys: string[] }
+//    Response: { items: [{ skill_key, skill_name, resolved }] }
+export type BackendSkillResolveItem = {
+  skill_key: string;
+  skill_name: string | null;
+  resolved: boolean;
+};
+
+export type BackendSkillResolveResponse = {
+  items: BackendSkillResolveItem[];
 };
 
 export type RecommendJobsRequest = {
@@ -170,7 +182,7 @@ export type BackendSkillResource = {
 };
 
 // --- Optional backend convenience endpoints ---
-// 1) GET /api/users/me/pathway-summary
+// 1) GET /api/legacy/users/me/pathway-summary
 //    Response: { skills: [{skill_key,name,level}], desired_job?, recommended_major?, gaps? }
 
 export type BackendPathwaySummarySkill = {

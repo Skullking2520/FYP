@@ -28,7 +28,8 @@ export default function LoginPage() {
       await login(email, password);
       router.push(getPostAuthRedirectPath());
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to sign in";
+      const raw = err instanceof Error ? err.message : "";
+      const message = raw && raw.trim().length > 0 ? raw : "Failed to sign in";
       setError(message);
     } finally {
       setSubmitting(false);

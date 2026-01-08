@@ -5,8 +5,17 @@ import { useOnboarding } from "../../_components/OnboardingProvider";
 import { Progress } from "../../_components/Progress";
 import { StepNav } from "../../_components/StepNav";
 import { useAuth } from "@/components/auth-provider";
-import { extractSkillsFromText, searchJobs } from "@/lib/backend-api";
+import { extractSkillsFromText } from "@/lib/backend-api";
 import type { SkillReference } from "@/types/api";
+
+const JOB_OPTIONS = [
+  "Data Scientist",
+  "ML Engineer",
+  "Software Engineer",
+  "Security Analyst",
+  "Game Developer",
+  "IT Analyst",
+] as const;
 
 export default function AboutStep() {
   const { data, setData } = useOnboarding();
@@ -22,20 +31,18 @@ export default function AboutStep() {
             (v): v is SkillReference =>
               !!v &&
               typeof v === "object" &&
-              typeof (v as any).skill_name === "string" &&
-              ((v as any).skill_id === undefined || (v as any).skill_id === null || typeof (v as any).skill_id === "string"),
+              typeof (v as Record<string, unknown>).skill_name === "string" &&
+              (((v as Record<string, unknown>).skill_id as unknown) === undefined ||
+                ((v as Record<string, unknown>).skill_id as unknown) === null ||
+                typeof (v as Record<string, unknown>).skill_id === "string"),
           )
-          .map((v) => ({ skill_name: String(v.skill_name), skill_id: (v as any).skill_id ?? null }))
+          .map((v) => ({ skill_name: String(v.skill_name), skill_id: v.skill_id ?? null }))
       : [],
   );
 
   const [target, setTarget] = useState<string>("");
   const [targetJob, setTargetJob] = useState<string>(data.career.targetJobs[0] ?? "");
   const [notes, setNotes] = useState<string>(data.career.notes);
-
-  const [jobSuggestions, setJobSuggestions] = useState<string[]>([]);
-  const [jobSuggestionsLoading, setJobSuggestionsLoading] = useState(false);
-  const [jobSuggestionsError, setJobSuggestionsError] = useState<string | null>(null);
 
   const [extracting, setExtracting] = useState(false);
   const [extractError, setExtractError] = useState<string | null>(null);
@@ -121,48 +128,10 @@ export default function AboutStep() {
   };
   const clearTarget = () => setTargetJob("");
 
-  useEffect(() => {
-    const q = target.trim();
-    let cancelled = false;
-    const handle = window.setTimeout(() => {
-      if (cancelled) return;
-
-      if (q.length < 2) {
-        setJobSuggestions([]);
-        setJobSuggestionsLoading(false);
-        setJobSuggestionsError(null);
-        return;
-      }
-
-      setJobSuggestionsLoading(true);
-      setJobSuggestionsError(null);
-      searchJobs(q, 30, token)
-        .then((items) => {
-          if (cancelled) return;
-          const titles = Array.isArray(items)
-            ? items
-                .map((j) => (typeof j?.title === "string" ? j.title.trim() : ""))
-                .filter((t) => t.length > 0)
-            : [];
-          setJobSuggestions(Array.from(new Set(titles)).slice(0, 12));
-        })
-        .catch((err) => {
-          if (cancelled) return;
-          setJobSuggestions([]);
-          const message = err instanceof Error ? err.message : "Job search failed";
-          setJobSuggestionsError(message);
-        })
-        .finally(() => {
-          if (cancelled) return;
-          setJobSuggestionsLoading(false);
-        });
-    }, 250);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(handle);
-    };
-  }, [target, token]);
+  const normalizedQuery = target.trim().toLowerCase();
+  const suggestions = normalizedQuery
+    ? JOB_OPTIONS.filter((title) => title.toLowerCase().includes(normalizedQuery)).slice(0, 8)
+    : [];
 
   return (
     <div>
@@ -180,21 +149,9 @@ export default function AboutStep() {
               onChange={(e) => setTarget(e.target.value)}
             />
 
-            {jobSuggestionsLoading && (
-              <div className="text-xs text-slate-500 px-1">Searching…</div>
-            )}
-
-            {!jobSuggestionsLoading && jobSuggestionsError && (
-              <div className="text-xs text-red-600 px-1">{jobSuggestionsError}</div>
-            )}
-
-            {!jobSuggestionsLoading && !jobSuggestionsError && target.trim().length >= 2 && jobSuggestions.length === 0 && (
-              <div className="text-xs text-slate-500 px-1">No results</div>
-            )}
-
-            {jobSuggestions.length > 0 && (
+            {suggestions.length > 0 && (
               <div className="rounded-xl border bg-white overflow-hidden">
-                {jobSuggestions.map((title) => (
+                {suggestions.map((title) => (
                   <button
                     key={title}
                     type="button"

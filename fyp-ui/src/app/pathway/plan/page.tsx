@@ -3,20 +3,24 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { SkillResourceCard } from "@/components/skill-resource-card";
-import { getJobMajors, getMajorGaps, getMajorPrograms, getSkillResources } from "@/lib/backend-api";
+import { useAuth } from "@/components/auth-provider";
+import { getJobMajors, getMajorGaps, getMajorPrograms, getSkillResources, resolveSkills } from "@/lib/backend-api";
+import { updateProfile } from "@/lib/api";
 import { loadSelectedJob, loadSelectedMajor, saveSelectedMajor } from "@/lib/pathway-storage";
-import { expandSkillKeysWithLevels, loadSelectedSkillsFromStorage, SELECTED_SKILLS_STORAGE_KEY } from "@/lib/skills-storage";
+import { formatSkillLabel, looksLikeUuid, loadSelectedSkillsFromStorage, normalizeSkillKey, SELECTED_SKILLS_STORAGE_KEY } from "@/lib/skills-storage";
+import { buildLocalProfileUpdatePayload } from "@/lib/resume";
 import type { BackendMajorProgramRanking, BackendMajorSkill, BackendSkillResource } from "@/types/api";
 import type { SkillResource } from "@/types";
 import type { SelectedSkill } from "@/components/skill-picker";
 
 function getMajorSkillDisplayName(skill: BackendMajorSkill): string {
-  return (
+  const key = typeof skill.skill_key === "string" ? skill.skill_key : "";
+  const rawName =
     (typeof skill.name === "string" && skill.name) ||
     (typeof (skill as { skill_name?: unknown }).skill_name === "string" && (skill as { skill_name: string }).skill_name) ||
-    (typeof skill.skill_key === "string" && skill.skill_key) ||
-    "(unknown skill)"
-  );
+    key;
+  const label = formatSkillLabel(rawName, key || rawName);
+  return label || "(unknown skill)";
 }
 
 function mapResource(resource: BackendSkillResource, skillName: string): SkillResource {
@@ -31,6 +35,7 @@ function mapResource(resource: BackendSkillResource, skillName: string): SkillRe
 }
 
 export default function PathwayPlanPage() {
+  const { token } = useAuth();
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobTitle, setJobTitle] = useState<string | undefined>(undefined);
 
@@ -42,13 +47,17 @@ export default function PathwayPlanPage() {
 
   const [skills, setSkills] = useState<SelectedSkill[]>([]);
 
-  const skillKeys = useMemo(() => expandSkillKeysWithLevels(skills), [skills]);
+  const skillKeys = useMemo(() => {
+    const keys = Array.isArray(skills) ? skills.map((s) => normalizeSkillKey(s.skill_key)).filter((k) => k.length > 0) : [];
+    return Array.from(new Set(keys));
+  }, [skills]);
 
   const [programs, setPrograms] = useState<BackendMajorProgramRanking[]>([]);
   const [programsLoading, setProgramsLoading] = useState(false);
   const [programsError, setProgramsError] = useState<string | null>(null);
 
   const [gaps, setGaps] = useState<BackendMajorSkill[]>([]);
+  const [gapSkillNameByKey, setGapSkillNameByKey] = useState<Record<string, string>>({});
   const [gapsLoading, setGapsLoading] = useState(false);
   const [gapsError, setGapsError] = useState<string | null>(null);
 
@@ -133,6 +142,12 @@ export default function PathwayPlanPage() {
         setMajorId(nextMajorId);
         setMajorName(top.major_name);
         saveSelectedMajor({ major_id: nextMajorId, major_name: top.major_name });
+        if (token) {
+          const payload = buildLocalProfileUpdatePayload();
+          void updateProfile(token, payload).catch((err) => {
+            console.warn("Failed to persist profile", err);
+          });
+        }
       })
       .catch((err) => {
         if (cancelled) return;
@@ -147,7 +162,7 @@ export default function PathwayPlanPage() {
     return () => {
       cancelled = true;
     };
-  }, [jobId, majorId]);
+  }, [jobId, majorId, token]);
 
   useEffect(() => {
     if (!majorId) return;
@@ -195,7 +210,7 @@ export default function PathwayPlanPage() {
       setResourcesError(null);
     });
 
-    getMajorGaps(majorId, skillKeys)
+    getMajorGaps(majorId, skillKeys, token)
       .then((data) => {
         if (cancelled) return;
         setGaps(Array.isArray(data) ? data : []);
@@ -213,12 +228,47 @@ export default function PathwayPlanPage() {
     return () => {
       cancelled = true;
     };
-  }, [majorId, skillKeys]);
+  }, [majorId, skillKeys, token]);
+
+  useEffect(() => {
+    const unresolved = gaps
+      .map((s) => {
+        const k = typeof s.skill_key === "string" ? s.skill_key : "";
+        const display = getMajorSkillDisplayName(s);
+        const needsResolve = display === "(unknown skill)" || looksLikeUuid(k);
+        return k && !gapSkillNameByKey[k] && needsResolve ? k : "";
+      })
+      .filter((k) => k.length > 0);
+    if (unresolved.length === 0) return;
+
+    let cancelled = false;
+    resolveSkills(Array.from(new Set(unresolved)))
+      .then((items) => {
+      if (cancelled) return;
+      const next: Record<string, string> = {};
+      for (const item of items) {
+        if (!item?.resolved || !item.skill_name) continue;
+        next[item.skill_key] = item.skill_name;
+      }
+      if (Object.keys(next).length === 0) return;
+      setGapSkillNameByKey((prev) => ({ ...prev, ...next }));
+      })
+      .catch(() => {
+        // ignore resolve failures
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [gapSkillNameByKey, gaps]);
 
   const selectedSkillName = useMemo(() => {
-    const name = selectedGapSkill ? getMajorSkillDisplayName(selectedGapSkill) : null;
+    if (!selectedGapSkill) return null;
+    const k = typeof selectedGapSkill.skill_key === "string" ? selectedGapSkill.skill_key : "";
+    const resolved = k ? gapSkillNameByKey[k] : null;
+    const name = resolved || getMajorSkillDisplayName(selectedGapSkill);
     return name;
-  }, [selectedGapSkill]);
+  }, [gapSkillNameByKey, selectedGapSkill]);
 
   const resourceCards = useMemo(() => {
     if (!selectedSkillName) return [];
@@ -328,7 +378,8 @@ export default function PathwayPlanPage() {
         {!gapsLoading && !gapsError && gaps.length > 0 && (
           <ul className="mt-4 space-y-2">
             {gaps.map((skill, idx) => {
-              const name = getMajorSkillDisplayName(skill);
+              const key = typeof skill.skill_key === "string" ? skill.skill_key : "";
+              const name = (key && gapSkillNameByKey[key]) || getMajorSkillDisplayName(skill);
               const selectedKey =
                 typeof (selectedGapSkill as { skill_id?: unknown } | null)?.skill_id === "number"
                   ? String((selectedGapSkill as { skill_id: number }).skill_id)

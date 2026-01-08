@@ -2,18 +2,21 @@
 
 import Link from "next/link";
 import { use, useEffect, useMemo, useState } from "react";
-import { getJob, getJobMajors, getJobSkills, getMajorPrograms } from "@/lib/backend-api";
+import { getJob, getJobMajors, getJobSkills, getMajorPrograms, resolveSkills } from "@/lib/backend-api";
+import { formatSkillLabel, looksLikeUuid } from "@/lib/skills-storage";
 import type { BackendJob, BackendJobSkill, BackendMajorProgramRanking, BackendMajorRecommendation } from "@/types/api";
 
 type Params = { job_id: string };
 
 function getSkillDisplayName(skill: BackendJobSkill): string {
-  return (
+  const rawName =
     (typeof skill.name === "string" && skill.name) ||
     (typeof skill.skill_name === "string" && skill.skill_name) ||
-    (typeof skill.skill_key === "string" && skill.skill_key) ||
-    "(unknown skill)"
-  );
+    null;
+  const key = typeof skill.skill_key === "string" && skill.skill_key ? skill.skill_key : "";
+  if (!rawName && !key) return "(unknown skill)";
+  const label = formatSkillLabel(rawName, key || rawName || "");
+  return label || "(unknown skill)";
 }
 
 export default function JobDetailPage({ params }: { params: Promise<Params> }) {
@@ -36,6 +39,7 @@ export default function JobDetailPage({ params }: { params: Promise<Params> }) {
   }, [jobId]);
   const [job, setJob] = useState<BackendJob | null>(null);
   const [skills, setSkills] = useState<BackendJobSkill[]>([]);
+  const [skillNameByKey, setSkillNameByKey] = useState<Record<string, string>>({});
   const [majors, setMajors] = useState<BackendMajorRecommendation[]>([]);
   const [majorsLoading, setMajorsLoading] = useState(false);
   const [majorsError, setMajorsError] = useState<string | null>(null);
@@ -82,6 +86,38 @@ export default function JobDetailPage({ params }: { params: Promise<Params> }) {
       cancelled = true;
     };
   }, [decodedJobId]);
+
+  useEffect(() => {
+    const unresolved = skills
+      .map((s) => {
+        const k = typeof s.skill_key === "string" ? s.skill_key : "";
+        const display = getSkillDisplayName(s);
+        const needsResolve = display === "(unknown skill)" || looksLikeUuid(k);
+        return k && !skillNameByKey[k] && needsResolve ? k : "";
+      })
+      .filter((k) => k.length > 0);
+    if (unresolved.length === 0) return;
+
+    let cancelled = false;
+    resolveSkills(Array.from(new Set(unresolved)))
+      .then((items) => {
+      if (cancelled) return;
+      const next: Record<string, string> = {};
+      for (const item of items) {
+        if (!item?.resolved || !item.skill_name) continue;
+        next[item.skill_key] = item.skill_name;
+      }
+      if (Object.keys(next).length === 0) return;
+      setSkillNameByKey((prev) => ({ ...prev, ...next }));
+      })
+      .catch(() => {
+        // ignore resolve failures
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [skillNameByKey, skills]);
 
   useEffect(() => {
     let cancelled = false;
@@ -222,7 +258,8 @@ export default function JobDetailPage({ params }: { params: Promise<Params> }) {
         ) : (
           <ul className="mt-4 space-y-2">
             {skills.map((skill, idx) => {
-              const name = getSkillDisplayName(skill);
+              const key = typeof skill.skill_key === "string" ? skill.skill_key : "";
+              const name = (key && skillNameByKey[key]) || getSkillDisplayName(skill);
               const importance = typeof skill.importance === "number" ? skill.importance : null;
               const secondary =
                 importance !== null
