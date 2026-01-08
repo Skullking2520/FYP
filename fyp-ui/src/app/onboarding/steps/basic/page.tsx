@@ -18,7 +18,7 @@ export default function BasicStep() {
     setData("basic", { ...data.basic, educationStage: v });
   };
 
-  const canNext = fullName.trim().length > 1 && educationStage !== null;
+  const canNext = fullName.trim().length > 0 && educationStage !== null;
 
   return (
     <div>

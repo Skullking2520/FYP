@@ -1,14 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { isAdminUser, isAdminUserEmail } from "@/lib/admin";
 import { getDashboardEntryPath, getRecommendationEntryPath } from "@/lib/resume";
 
 export function Sidebar() {
   const router = useRouter();
-  const { user, logout } = useAuth();
+  const pathname = usePathname();
+  const { user, token, logout } = useAuth();
+
+  // RootLayout renders Sidebar for every route; hide it on auth pages and when logged out.
+  if (!token) return null;
+  if (pathname === "/login" || pathname === "/register") return null;
+
   const persistedEmail = typeof window === "undefined" ? null : window.localStorage.getItem("careerpath_login_email");
   const isAdmin = isAdminUser(user) || isAdminUserEmail(persistedEmail);
 
@@ -20,7 +26,7 @@ export function Sidebar() {
           className="block w-full text-left"
           onClick={() => router.push(getDashboardEntryPath())}
         >
-          Dashboard
+          Onboarding
         </button>
         <button
           type="button"
@@ -45,7 +51,8 @@ export function Sidebar() {
           className="w-full rounded-xl border px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
           onClick={() => {
             logout();
-            router.push("/login");
+            router.replace("/login");
+            router.refresh();
           }}
         >
           Log out

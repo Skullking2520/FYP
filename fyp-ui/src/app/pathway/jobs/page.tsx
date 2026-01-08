@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { extractSkillsFromText, recommendJobs, searchJobs, searchSkills } from "@/lib/backend-api";
+import { extractSkillsFromText, logRecommendJobPick, recommendJobsWithTracking, searchJobs, searchSkills } from "@/lib/backend-api";
 import { useAuth } from "@/components/auth-provider";
+import { setSelectedJob } from "@/lib/api";
 import { clearSelectedMajor, loadSelectedJob, saveSelectedJob } from "@/lib/pathway-storage";
 import { expandSkillKeysWithLevels, loadSelectedSkillsFromStorage, SELECTED_SKILLS_STORAGE_KEY } from "@/lib/skills-storage";
-import type { BackendJobRecommendation } from "@/types/api";
+import type { BackendJobRecommendation, BackendJobSearchResult } from "@/types/api";
 import type { SelectedSkill } from "@/components/skill-picker";
 
 function formatScore(score: unknown): string {
@@ -40,8 +41,8 @@ function matchJobByTitle(targetTitle: string, jobs: BackendJobRecommendation[]):
 
 function matchSearchResultByTitle(
   targetTitle: string,
-  items: { title?: string | null }[],
-): { title?: string | null } | null {
+  items: BackendJobSearchResult[],
+): BackendJobSearchResult | null {
   const desired = normalizeTitle(targetTitle);
   if (!desired) return null;
   return (
@@ -79,17 +80,51 @@ export default function PathwayJobsPage() {
   const [skills, setSkills] = useState<SelectedSkill[]>(() => loadSelectedSkillsFromStorage());
   const [targetJob, setTargetJob] = useState<string | null>(() => (typeof window === "undefined" ? null : loadUserTypedTargetJob()));
   const [selectedJobId, setSelectedJobId] = useState<string | null>(() => (typeof window === "undefined" ? null : loadSelectedJob()?.job_id ?? null));
+
+  const persistSelectedJob = useCallback(
+    (job: { job_id: string; title?: string | null; recommendation_id?: string | number | null }) => {
+      const jobId = String(job.job_id);
+      const title = typeof job.title === "string" ? job.title : "";
+      const recId =
+        job.recommendation_id === null || job.recommendation_id === undefined
+          ? null
+          : String(job.recommendation_id).trim() || null;
+
+      saveSelectedJob({ job_id: jobId, title: title || undefined });
+      setSelectedJobId(jobId);
+
+      if (!token) return;
+      void setSelectedJob(token, {
+        job_id: jobId,
+        job_title: title || jobId,
+        recommendation_id: recId,
+      }).catch((err) => {
+        console.warn("Failed to persist selected job", err);
+      });
+
+      if (recId) {
+        void logRecommendJobPick(recId, jobId, token).catch((err) => {
+          console.warn("Failed to log recommendation pick", err);
+        });
+      }
+    },
+    [token],
+  );
+
   const selectedJobTitle = useMemo(() => {
     if (typeof window === "undefined") return null;
+    void selectedJobId;
     const stored = loadSelectedJob();
     return stored?.title ?? null;
   }, [selectedJobId]);
   const [jobs, setJobs] = useState<BackendJobRecommendation[]>([]);
+  const [recommendationId, setRecommendationId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const storedSelectedJob = useMemo(() => {
     if (typeof window === "undefined") return null;
+    void selectedJobId;
     return loadSelectedJob();
   }, [selectedJobId]);
 
@@ -128,6 +163,7 @@ export default function PathwayJobsPage() {
     if (skillKeys.length === 0) {
       queueMicrotask(() => {
         setJobs([]);
+        setRecommendationId(null);
         setError(null);
         setLoading(false);
       });
@@ -140,12 +176,14 @@ export default function PathwayJobsPage() {
       setLoading(true);
       setError(null);
       setJobs([]);
+      setRecommendationId(null);
     });
 
-    recommendJobs(skillKeys)
-      .then((data) => {
+    recommendJobsWithTracking(skillKeys, token)
+      .then(({ items, recommendation_id }) => {
         if (cancelled) return;
-        setJobs(Array.isArray(data) ? data : []);
+        setJobs(Array.isArray(items) ? items : []);
+        setRecommendationId(recommendation_id);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -160,7 +198,7 @@ export default function PathwayJobsPage() {
     return () => {
       cancelled = true;
     };
-  }, [skillKeys]);
+  }, [skillKeys, token]);
 
   return (
     <div className="space-y-6 p-6">
@@ -199,8 +237,11 @@ export default function PathwayJobsPage() {
                   }
                   // Best-effort: if we already have a direct title match from the current recommendations, use it.
                   if (targetJobMatch) {
-                    saveSelectedJob({ job_id: String(targetJobMatch.job_id), title: targetJobMatch.title });
-                    setSelectedJobId(String(targetJobMatch.job_id));
+                    persistSelectedJob({
+                      job_id: String(targetJobMatch.job_id),
+                      title: targetJobMatch.title,
+                      recommendation_id: recommendationId,
+                    });
                     router.push("/pathway/majors");
                     return;
                   }
@@ -209,13 +250,12 @@ export default function PathwayJobsPage() {
                     try {
                       // Preferred: resolve the typed title via backend search API.
                       const search = await searchJobs(targetJob, 50);
-                      const found = matchSearchResultByTitle(targetJob, search) as any;
+                      const found = matchSearchResultByTitle(targetJob, search);
                       if (found) {
                         const jobRef = typeof found.job_ref === "string" && found.job_ref.trim() ? found.job_ref.trim() : null;
                         const jobId = found.job_id;
                         const idToStore = jobRef ?? (typeof jobId === "string" ? jobId : String(jobId));
-                        saveSelectedJob({ job_id: idToStore, title: targetJob });
-                        setSelectedJobId(idToStore);
+                        persistSelectedJob({ job_id: idToStore, title: targetJob });
                         router.push("/pathway/majors");
                         return;
                       }
@@ -245,15 +285,19 @@ export default function PathwayJobsPage() {
                         return;
                       }
 
-                      const recs = await recommendJobs(uniq);
+                      const tracked = await recommendJobsWithTracking(uniq, token);
+                      const recs = tracked.items;
                       const matched = matchJobByTitle(targetJob, Array.isArray(recs) ? recs : []);
                       const best = matched ?? (Array.isArray(recs) && recs.length > 0 ? recs[0] : null);
                       if (!best) {
                         // Last resort: if recommendations exist on the page, continue with top-1.
                         const fallbackFromCurrent = jobs.length > 0 ? jobs[0] : null;
                         if (fallbackFromCurrent) {
-                          saveSelectedJob({ job_id: String(fallbackFromCurrent.job_id), title: targetJob });
-                          setSelectedJobId(String(fallbackFromCurrent.job_id));
+                          persistSelectedJob({
+                            job_id: String(fallbackFromCurrent.job_id),
+                            title: targetJob,
+                            recommendation_id: recommendationId,
+                          });
                           router.push("/pathway/majors");
                           return;
                         }
@@ -261,8 +305,11 @@ export default function PathwayJobsPage() {
                         return;
                       }
 
-                      saveSelectedJob({ job_id: String(best.job_id), title: targetJob });
-                      setSelectedJobId(String(best.job_id));
+                      persistSelectedJob({
+                        job_id: String(best.job_id),
+                        title: targetJob,
+                        recommendation_id: tracked.recommendation_id,
+                      });
                       router.push("/pathway/majors");
                     } catch {
                       setError("We couldn't resolve your future job. Please select a job below.");
@@ -270,7 +317,7 @@ export default function PathwayJobsPage() {
                   })();
                 }}
               >
-                No thanks, I’ll stick with this job
+                Continue
               </button>
             </div>
           </div>
@@ -287,12 +334,12 @@ export default function PathwayJobsPage() {
                 setError(null);
                 // Re-affirm the previous selection and continue.
                 if (storedSelectedJob?.job_id) {
-                  saveSelectedJob({ job_id: String(storedSelectedJob.job_id), title: storedSelectedJob.title });
+                  persistSelectedJob({ job_id: String(storedSelectedJob.job_id), title: storedSelectedJob.title ?? null });
                 }
                 router.push("/pathway/majors");
               }}
             >
-              No thanks, I’ll stick with this job
+              Continue
             </button>
           </div>
         )}
@@ -305,10 +352,10 @@ export default function PathwayJobsPage() {
       {skills.length === 0 && (
         <section className="rounded-2xl border bg-white p-6 shadow-sm">
           <div className="text-sm text-slate-700">No skills selected yet.</div>
-          <p className="mt-2 text-sm text-slate-600">Go to Dashboard and pick skills first, then come back here.</p>
+          <p className="mt-2 text-sm text-slate-600">Go to Onboarding and pick skills first, then come back here.</p>
           <div className="mt-4 flex gap-3">
             <Link href="/dashboard" className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white">
-              Go to dashboard
+              Go to onboarding
             </Link>
           </div>
         </section>
@@ -343,8 +390,11 @@ export default function PathwayJobsPage() {
                     <button
                       className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
                       onClick={() => {
-                        saveSelectedJob({ job_id: String(job.job_id), title: job.title });
-                        setSelectedJobId(String(job.job_id));
+                        persistSelectedJob({
+                          job_id: String(job.job_id),
+                          title: job.title,
+                          recommendation_id: recommendationId,
+                        });
                         router.push("/pathway/majors");
                       }}
                     >
@@ -357,7 +407,7 @@ export default function PathwayJobsPage() {
           )}
 
           <div className="mt-6 text-sm text-slate-600">
-            Want to adjust your skills? <Link href="/dashboard" className="underline">Go back to Dashboard</Link>
+            Want to adjust your skills? <Link href="/dashboard" className="underline">Go back to Onboarding</Link>
           </div>
         </section>
       )}

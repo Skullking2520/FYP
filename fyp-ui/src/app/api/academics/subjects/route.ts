@@ -58,10 +58,12 @@ export async function GET(req: Request) {
     }
 
     const data = (await upstream.json()) as unknown;
-    const subjects =
-      data && typeof data === "object" && "items" in data && Array.isArray((data as any).items)
-        ? ((data as any).items as unknown[]).filter((s) => typeof s === "string")
-        : null;
+    const subjects = (() => {
+      if (!data || typeof data !== "object") return null;
+      const items = (data as Record<string, unknown>).items;
+      if (!Array.isArray(items)) return null;
+      return (items as unknown[]).filter((s): s is string => typeof s === "string");
+    })();
 
     if (!subjects) {
       return NextResponse.json({ detail: "Invalid response from backend subject API" }, { status: 502 });

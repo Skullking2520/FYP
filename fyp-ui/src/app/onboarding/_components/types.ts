@@ -12,7 +12,7 @@ export type Interests = {
 export type Academics = {
   mathLevel: "low" | "mid" | "high" | null;
   csTaken: boolean;
-  subjects: { name: string; grade: string }[];
+  subjects: { level: "olevel" | "alevel"; name: string; grade: string }[];
   mappedSkills?: { skill_key: string; level: number }[];
   subjectsNote: string; // legacy free text (optional)
   gradesNote: string; // legacy free text (optional)

@@ -14,7 +14,10 @@ function getUpstreamBaseUrl(): string {
 }
 
 function withDebugHeaders(headers: Headers, upstreamUrl: string): Headers {
-  if (process.env.NODE_ENV === "production") return headers;
+  // Keep this opt-in in production to avoid leaking infrastructure details.
+  // Enable by setting UPSTREAM_DEBUG_HEADERS=1 in the deployment environment.
+  const enabled = process.env.UPSTREAM_DEBUG_HEADERS === "1";
+  if (!enabled) return headers;
   const next = new Headers(headers);
   next.set("x-upstream-url", upstreamUrl);
   return next;
@@ -24,6 +27,8 @@ function filterResponseHeaders(headers: Headers): Headers {
   const result = new Headers();
   for (const [key, value] of headers.entries()) {
     const lower = key.toLowerCase();
+    if (lower === "content-encoding") continue;
+    if (lower === "content-length") continue;
     if (lower === "connection") continue;
     if (lower === "keep-alive") continue;
     if (lower === "proxy-authenticate") continue;

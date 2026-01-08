@@ -146,7 +146,7 @@ export default function RecommendationsPage() {
       </section>
 
       <div className="text-sm text-slate-600">
-        Want to change your skills? <Link className="underline" href="/dashboard">Go to dashboard</Link>
+        Want to change your skills? <Link className="underline" href="/dashboard">Go to onboarding</Link>
       </div>
     </div>
   );

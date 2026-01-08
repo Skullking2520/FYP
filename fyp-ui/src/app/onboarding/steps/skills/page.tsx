@@ -1,12 +1,21 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { SkillPicker, type SelectedSkill } from "@/components/skill-picker";
 import { Progress } from "../../_components/Progress";
 import { StepNav } from "../../_components/StepNav";
 import { useOnboarding } from "../../_components/OnboardingProvider";
-import { formatSkillLabel, loadSelectedSkillsFromStorage, saveSelectedSkillsToStorage } from "@/lib/skills-storage";
-import { getSkillDetail, searchSkills } from "@/lib/backend-api";
+import { useAuth } from "@/components/auth-provider";
+import {
+  coerceSkillLevel,
+  formatSkillLabel,
+  looksLikeUuid,
+  loadSelectedSkillsFromStorage,
+  normalizeSkillKey,
+  saveSelectedSkillsToStorage,
+} from "@/lib/skills-storage";
+import { resolveSkills, resolveSkill, searchSkills } from "@/lib/backend-api";
+import { updateStructuredProfile } from "@/lib/api";
 
 const ONBOARDING_DONE_KEY = "onboarding_completed_v1";
 
@@ -34,43 +43,165 @@ function buildPrefillQueries(params: {
 
 export default function SkillsStep() {
   const { data } = useOnboarding();
+  const { token } = useAuth();
   const [selectedSkills, setSelectedSkills] = useState<SelectedSkill[]>(() => loadSelectedSkillsFromStorage());
-  const userEditedSkillsRef = useRef(false);
+
+  const structuredSkillsPayload = useMemo(() => {
+    // Backend expects levels in a 0..5-ish scale (historically). Our UI uses 0..10.
+    // To avoid backend validation errors, map to 0..5 in 0.5 steps.
+    const toBackendLevel = (level: unknown): number => {
+      const raw = typeof level === "number" && Number.isFinite(level) ? level : 0;
+      const clamped = Math.max(0, Math.min(10, raw));
+      // UI can be 0.5 steps in 0..10. Convert to 0..5 with 0.5 steps.
+      const mapped = Math.round(clamped) / 2;
+      return Math.max(0, Math.min(5, mapped));
+    };
+
+    const byKey = new Map<string, number>();
+    for (const s of selectedSkills) {
+      const key = normalizeSkillKey(s.skill_key);
+      if (!key) continue;
+      const nextLevel = toBackendLevel(s.level);
+      const prev = byKey.get(key);
+      if (prev === undefined || nextLevel > prev) byKey.set(key, nextLevel);
+    }
+
+    return Array.from(byKey.entries()).map(([skill_key, level]) => ({ skill_key, level }));
+  }, [selectedSkills]);
+
+  // Normalize keys and resolve missing/UUID-like labels using the backend.
+  // This is important because some UUID keys can be persisted with spaces and
+  // because prefill sources may provide keys without a reliable name.
+  useEffect(() => {
+    let cancelled = false;
+
+    const needsResolve = selectedSkills.filter((s) => {
+      const normalizedKey = normalizeSkillKey(s.skill_key);
+      const label = formatSkillLabel(s.name, normalizedKey);
+      return !label || looksLikeUuid(s.name) || looksLikeUuid(normalizedKey) || normalizedKey !== s.skill_key;
+    });
+
+    if (needsResolve.length === 0) return;
+
+    const keys = Array.from(new Set(needsResolve.slice(0, 20).map((s) => normalizeSkillKey(s.skill_key)).filter((k) => k.length > 0)));
+
+    resolveSkills(keys)
+      .then((items) => {
+        const updates = items
+          .filter((i) => i && typeof i.skill_key === "string")
+          .map((i) => (i.resolved && i.skill_name ? { skill_key: i.skill_key, name: i.skill_name } : null));
+
+      if (cancelled) return;
+
+      setSelectedSkills((prev) => {
+        const byKey = new Map<string, SelectedSkill>();
+        for (const s of prev) {
+          const k = normalizeSkillKey(s.skill_key);
+          const existing = byKey.get(k);
+          if (!existing || s.level > existing.level) byKey.set(k, { ...s, skill_key: k });
+        }
+
+        let changed = false;
+
+        // Apply normalized key updates + resolved names.
+        for (const u of updates) {
+          if (!u) continue;
+          const prevSkill = byKey.get(u.skill_key);
+          if (!prevSkill) continue;
+          const prevLabel = formatSkillLabel(prevSkill.name, prevSkill.skill_key);
+          const nextLabel = formatSkillLabel(u.name, prevSkill.skill_key);
+          if (!nextLabel) continue;
+          if (!prevLabel || prevLabel !== nextLabel || prevSkill.name !== u.name) {
+            byKey.set(u.skill_key, { ...prevSkill, name: u.name });
+            changed = true;
+          }
+        }
+
+        const next = Array.from(byKey.values());
+        if (!changed && next.length === prev.length) return prev;
+        return next;
+      });
+      })
+      .catch(() => {
+        // ignore resolve failures
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSkills]);
 
   useEffect(() => {
-    if (userEditedSkillsRef.current) return;
     const extracted = Array.isArray(data.about.extractedSkills) ? data.about.extractedSkills : [];
     if (extracted.length === 0) return;
 
     const queries = extracted
-      .map((s) => (typeof (s as any)?.skill_name === "string" ? String((s as any).skill_name).trim() : ""))
+      .map((s) => {
+        if (!s || typeof s !== "object") return "";
+        const name = (s as Record<string, unknown>).skill_name;
+        return typeof name === "string" ? name.trim() : "";
+      })
       .filter((x) => x.length > 0)
       .slice(0, 10);
     if (queries.length === 0) return;
 
     let cancelled = false;
     Promise.all(
-      queries.map(async (q) => {
-        const results = await searchSkills(q);
-        const exact = results.find((s) => s.name.toLowerCase() === q.toLowerCase());
-        return exact ?? results[0] ?? null;
+      queries.map(async (rawQuery) => {
+        const raw = rawQuery.trim();
+        if (!raw) return null;
+
+        const isUrl = /^https?:\/\//i.test(raw);
+        const candidateKey = normalizeSkillKey(raw);
+
+        // If the extractor produced a URI/UUID-like token, try resolving it as a key first.
+        if ((isUrl || looksLikeUuid(raw)) && candidateKey) {
+          try {
+            const resolved = await resolveSkill(candidateKey);
+            if (resolved?.resolved && typeof resolved.skill_name === "string" && resolved.skill_name.trim()) {
+              return {
+                skill_key: candidateKey,
+                name: resolved.skill_name.trim(),
+                level: 0,
+              } satisfies SelectedSkill;
+            }
+          } catch {
+            // fall through to search
+          }
+        }
+
+        // Use a human-readable query (e.g. ESCO URI -> tail) when searching.
+        const queryText = formatSkillLabel(raw, candidateKey) || raw;
+        // Avoid searching for UUID-looking tokens; it tends to return garbage.
+        if (looksLikeUuid(queryText)) return null;
+
+        try {
+          const results = await searchSkills(queryText);
+          const exact = results.find((s) => s.name.toLowerCase() === queryText.toLowerCase());
+          const hit = exact ?? results[0] ?? null;
+          if (!hit) return null;
+
+          const hitKey = normalizeSkillKey(hit.skill_key);
+          const name = formatSkillLabel(hit.name ?? queryText, hitKey) || queryText;
+          return { skill_key: hitKey, name, level: 0 } satisfies SelectedSkill;
+        } catch {
+          return null;
+        }
       }),
     )
       .then((hits) => {
-        if (cancelled || userEditedSkillsRef.current) return;
+        if (cancelled) return;
         setSelectedSkills((prev) => {
           const byKey = new Map<string, SelectedSkill>();
-          for (const s of prev) byKey.set(s.skill_key, s);
+          for (const s of prev) byKey.set(normalizeSkillKey(s.skill_key), { ...s, skill_key: normalizeSkillKey(s.skill_key) });
 
           for (const hit of hits) {
             if (!hit) continue;
-            if (!hit.skill_key || !String(hit.skill_key).trim()) continue;
-            if (byKey.has(hit.skill_key)) continue;
-            const name =
-              typeof hit.name === "string" && hit.name.trim()
-                ? hit.name.trim()
-                : formatSkillLabel("", hit.skill_key) || "Unknown skill";
-            byKey.set(hit.skill_key, { skill_key: hit.skill_key, name, level: 1 });
+            const hitKey = normalizeSkillKey(hit.skill_key);
+            if (!hitKey) continue;
+            if (byKey.has(hitKey)) continue;
+            const safeName = typeof hit.name === "string" ? hit.name.trim() : "";
+            byKey.set(hitKey, { skill_key: hitKey, name: safeName || formatSkillLabel(undefined, hitKey) || hitKey, level: 0 });
           }
 
           return Array.from(byKey.values());
@@ -90,24 +221,41 @@ export default function SkillsStep() {
   }, [selectedSkills]);
 
   useEffect(() => {
-    if (userEditedSkillsRef.current) return;
-    if (selectedSkills.length > 0) return;
-
     let cancelled = false;
 
     const mapped = Array.isArray(data.academics.mappedSkills) ? data.academics.mappedSkills : [];
     const extracted = Array.isArray(data.about.extractedSkills) ? data.about.extractedSkills : [];
 
-    const extractedQueries = extracted
-      .map((s) => (typeof (s as any)?.skill_name === "string" ? String((s as any).skill_name).trim() : ""))
-      .filter((x) => x.length > 0)
+    const extractedHints = extracted
+      .map((s) => {
+        if (!s || typeof s !== "object") return null;
+        const record = s as Record<string, unknown>;
+        const rawName = typeof record.skill_name === "string" ? record.skill_name.trim() : "";
+        const rawId = typeof record.skill_id === "string" ? record.skill_id.trim() : "";
+        const keyHint = rawId || (rawName.startsWith("http://") || rawName.startsWith("https://") ? rawName : "");
+        const query = rawName || rawId;
+        if (!query) return null;
+        return { query, keyHint: keyHint || null };
+      })
+      .filter((x): x is { query: string; keyHint: string | null } => !!x)
       .slice(0, 12);
 
     const normalizedMapped = mapped
       .filter((v): v is { skill_key: string; level: number } =>
-        !!v && typeof (v as any).skill_key === "string" && typeof (v as any).level === "number",
+        !!v &&
+        typeof v === "object" &&
+        typeof (v as Record<string, unknown>).skill_key === "string" &&
+        typeof (v as Record<string, unknown>).level === "number",
       )
-      .map((v) => ({ skill_key: String((v as any).skill_key), level: Math.max(0, Math.min(5, Math.round(Number((v as any).level)))) }));
+      .map((v) => {
+        const record = v as Record<string, unknown>;
+        const level = typeof record.level === "number" ? record.level : Number(record.level ?? 0);
+        return {
+          skill_key: normalizeSkillKey(String(record.skill_key ?? "")),
+          level: coerceSkillLevel(level, 0),
+        };
+      })
+      .filter((v) => v.skill_key.length > 0 && Number.isFinite(v.level));
 
     const byKey = new Map<string, number>();
     for (const item of normalizedMapped) {
@@ -123,42 +271,90 @@ export default function SkillsStep() {
     const fallbackQueries = buildPrefillQueries({
       mathLevel: data.academics.mathLevel,
       csTaken: data.academics.csTaken,
-      subjects: data.academics.subjects,
+      subjects: Array.isArray(data.academics.subjects)
+        ? data.academics.subjects.map((r) => {
+            if (!r || typeof r !== "object") return { name: "", grade: "" };
+            const record = r as Record<string, unknown>;
+            return {
+              name: typeof record.name === "string" ? record.name : "",
+              grade: typeof record.grade === "string" ? record.grade : "",
+            };
+          })
+        : [],
     });
 
-    const useFallback = topMapped.length === 0 && extractedQueries.length === 0;
-    const nameQueries = useFallback ? fallbackQueries : extractedQueries;
+    const useFallback = topMapped.length === 0 && extractedHints.length === 0;
+    const nameQueries: Array<{ query: string; keyHint: string | null }> = useFallback
+      ? fallbackQueries.map((q) => ({ query: q, keyHint: null }))
+      : extractedHints;
 
     Promise.all([
       ...topMapped.map(async ({ skill_key, level }) => {
+        const normalizedKey = normalizeSkillKey(skill_key);
         try {
-          const q = skill_key.replace(/[_-]+/g, " ");
-          const results = await searchSkills(q);
-          const exact = results.find((s) => s.skill_key === skill_key);
-          const byName = results.find((s) => s.name.toLowerCase() === q.toLowerCase());
-          const hit = exact ?? byName ?? null;
-          if (hit?.name && hit.name.trim()) {
-            return { skill_key, name: hit.name.trim(), level } satisfies SelectedSkill;
+          const baseLabel = formatSkillLabel(undefined, normalizedKey);
+          if (!baseLabel || looksLikeUuid(baseLabel)) {
+            const resolved = await resolveSkill(normalizedKey);
+            const name = resolved.resolved ? resolved.skill_name : null;
+            return {
+              skill_key: normalizedKey,
+              name: formatSkillLabel(name ?? undefined, normalizedKey),
+              level,
+            } satisfies SelectedSkill;
           }
 
-          // Fallback: some skill_key values are ESCO URIs or codes; try detail.
-          const detail = await getSkillDetail(skill_key);
-          const detailName = typeof detail?.name === "string" ? detail.name.trim() : "";
-          const name = detailName || formatSkillLabel("", skill_key) || "Unknown skill";
-          return { skill_key, name, level } satisfies SelectedSkill;
+          const q = baseLabel.replace(/[_-]+/g, " ");
+          const results = await searchSkills(q);
+          const exact = results.find((s) => normalizeSkillKey(s.skill_key) === normalizedKey);
+          const byName = results.find((s) => s.name.toLowerCase() === q.toLowerCase());
+          const hit = exact ?? byName ?? null;
+          return {
+            skill_key: normalizedKey,
+            name: formatSkillLabel(hit?.name, normalizedKey),
+            level,
+          } satisfies SelectedSkill;
         } catch {
-          const name = formatSkillLabel("", skill_key) || "Unknown skill";
-          return { skill_key, name, level } satisfies SelectedSkill;
+          return {
+            skill_key: normalizedKey,
+            name: formatSkillLabel(undefined, normalizedKey),
+            level,
+          } satisfies SelectedSkill;
         }
       }),
-      ...nameQueries.map(async (q) => {
+      ...nameQueries.map(async ({ query, keyHint }) => {
+        const raw = query.trim();
+        if (!raw) return null;
+
+        const hint = (keyHint ?? "").trim();
+        const keyCandidate = normalizeSkillKey(hint || raw);
+        const isUrl = /^https?:\/\//i.test(hint || raw);
+
+        // Prefer resolving an ID/URI directly if we have one.
+        if ((isUrl || looksLikeUuid(hint || raw)) && keyCandidate) {
+          try {
+            const resolved = await resolveSkill(keyCandidate);
+            const name = typeof resolved?.skill_name === "string" ? resolved.skill_name.trim() : "";
+            if (resolved?.resolved && name) {
+              return { skill_key: keyCandidate, name, level: 0 } satisfies SelectedSkill;
+            }
+          } catch {
+            // fall through
+          }
+        }
+
+        const searchText = formatSkillLabel(raw, keyCandidate) || raw;
+        // If we can't form a human-readable query, skip rather than adding "Unknown skill".
+        if (!searchText || looksLikeUuid(searchText)) return null;
+
         try {
-          const results = await searchSkills(q);
-          const exact = results.find((s) => s.name.toLowerCase() === q.toLowerCase());
+          const results = await searchSkills(searchText);
+          const exact = results.find((s) => s.name.toLowerCase() === searchText.toLowerCase());
           const hit = exact ?? results[0] ?? null;
           if (!hit) return null;
-          if (!hit.skill_key || !String(hit.skill_key).trim()) return null;
-          return { skill_key: hit.skill_key, name: hit.name, level: 1 } satisfies SelectedSkill;
+          const hitKey = normalizeSkillKey(hit.skill_key);
+          const name = formatSkillLabel(hit.name ?? searchText, hitKey) || searchText;
+          if (!name) return null;
+          return { skill_key: hitKey, name, level: 0 } satisfies SelectedSkill;
         } catch {
           return null;
         }
@@ -167,14 +363,37 @@ export default function SkillsStep() {
       .then((items) => {
         if (cancelled) return;
         const nextByKey = new Map<string, SelectedSkill>();
+
+        // Start from existing selections and only ever raise levels.
+        for (const s of selectedSkills) {
+          const k = normalizeSkillKey(s.skill_key);
+          const prev = nextByKey.get(k);
+          if (!prev || s.level > prev.level) nextByKey.set(k, { ...s, skill_key: k });
+        }
+
         for (const item of items) {
           if (!item) continue;
-          if (!item.skill_key || !item.skill_key.trim()) continue;
           const prev = nextByKey.get(item.skill_key);
           if (!prev || item.level > prev.level) nextByKey.set(item.skill_key, item);
         }
-        const next = Array.from(nextByKey.values());
-        if (next.length > 0) setSelectedSkills(next);
+        const next = Array.from(nextByKey.values()).filter((s) => {
+          const key = normalizeSkillKey(s.skill_key);
+          const label = formatSkillLabel(s.name, key);
+          const isPlaceholder = !label && (looksLikeUuid(s.name) || looksLikeUuid(key) || /^https?:\/\//i.test(key));
+          // Only drop placeholders that are auto-prefilled (level 0).
+          if (isPlaceholder && s.level <= 0) return false;
+          return true;
+        });
+
+        const changed =
+          next.length !== selectedSkills.length ||
+          next.some((n) => {
+            const prev = selectedSkills.find((s) => normalizeSkillKey(s.skill_key) === n.skill_key);
+            if (!prev) return true;
+            return prev.level !== n.level || prev.name !== n.name;
+          });
+
+        if (changed && next.length > 0) setSelectedSkills(next);
       })
       .catch(() => {
         // ignore prefill failures
@@ -183,7 +402,7 @@ export default function SkillsStep() {
     return () => {
       cancelled = true;
     };
-  }, [data, selectedSkills.length]);
+  }, [data, selectedSkills]);
 
   const canNext = selectedSkills.length > 0;
 
@@ -204,30 +423,25 @@ export default function SkillsStep() {
               <span className="font-semibold">0</span>: Not familiar
             </div>
             <div>
-              <span className="font-semibold">1</span>: Basic awareness (can follow tutorials)
+              <span className="font-semibold">2</span>: Basic awareness (can follow tutorials)
             </div>
             <div>
-              <span className="font-semibold">2</span>: Beginner (have tried small tasks/projects)
+              <span className="font-semibold">4</span>: Beginner (have tried small tasks/projects)
             </div>
             <div>
-              <span className="font-semibold">3</span>: Intermediate (can work independently)
+              <span className="font-semibold">6</span>: Intermediate (can work independently)
             </div>
             <div>
-              <span className="font-semibold">4</span>: Advanced (can solve complex problems)
+              <span className="font-semibold">8</span>: Advanced (can solve complex problems)
             </div>
             <div>
-              <span className="font-semibold">5</span>: Expert (can mentor/teach others)
+              <span className="font-semibold">10</span>: Expert (can mentor/teach others)
             </div>
+            <div className="md:col-span-2 text-xs text-slate-600 mt-1">Tip: you can use half steps (e.g., 6.5) for finer control.</div>
           </div>
         </div>
 
-        <SkillPicker
-          value={selectedSkills}
-          onChange={(next) => {
-            userEditedSkillsRef.current = true;
-            setSelectedSkills(next);
-          }}
-        />
+        <SkillPicker value={selectedSkills} onChange={setSelectedSkills} />
       </div>
 
       <StepNav
@@ -241,6 +455,12 @@ export default function SkillsStep() {
           } catch {
             // ignore
           }
+
+          if (!token) return;
+          if (structuredSkillsPayload.length === 0) return;
+          void updateStructuredProfile(token, { skills: structuredSkillsPayload }, { keepalive: true }).catch((err) => {
+            console.warn("Failed to persist structured skills", err);
+          });
         }}
       />
     </div>
