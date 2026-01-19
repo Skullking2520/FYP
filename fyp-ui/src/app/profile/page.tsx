@@ -305,7 +305,7 @@ export default function ProfilePage() {
             } catch (err) {
               if (loadSeqRef.current !== seq) return;
               if (err instanceof BackendRequestError && (err.status === 401 || err.status === 403)) {
-                setGapsError("세션이 만료되었습니다. 다시 로그인해주세요.");
+                setGapsError("Your session has expired. Please log in again.");
                 setGaps([]);
               } else {
                 const message = err instanceof Error ? err.message : "Failed to load gap analysis";
@@ -365,7 +365,7 @@ export default function ProfilePage() {
       } catch (err) {
         if (loadSeqRef.current !== seq) return;
         if (err instanceof BackendRequestError && (err.status === 401 || err.status === 403)) {
-          setGapsError("세션이 만료되었습니다. 다시 로그인해주세요.");
+          setGapsError("Your session has expired. Please log in again.");
           setGaps([]);
         } else {
           const message = err instanceof Error ? err.message : "Failed to load gap analysis";

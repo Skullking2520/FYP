@@ -49,7 +49,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     }
   }, []);
 
-  // 저장 (첫 마운트는 스킵)
+  // Persist to storage (skip initial mount)
   const didMount = useRef(false);
   useEffect(() => {
     if (!hydratedRef.current) return;
@@ -62,7 +62,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     } catch {}
   }, [data]);
 
-  // ✅ 안정적인 setter
+  // Stable setter
   const setPartial = useCallback(<K extends keyof OnboardingData>(key: K, value: OnboardingData[K]) => {
     setState(prev => ({ ...prev, [key]: value }));
   }, []);

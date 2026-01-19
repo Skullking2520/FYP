@@ -362,38 +362,40 @@ export default function SkillsStep() {
     ])
       .then((items) => {
         if (cancelled) return;
-        const nextByKey = new Map<string, SelectedSkill>();
+        setSelectedSkills((prev) => {
+          const nextByKey = new Map<string, SelectedSkill>();
 
-        // Start from existing selections and only ever raise levels.
-        for (const s of selectedSkills) {
-          const k = normalizeSkillKey(s.skill_key);
-          const prev = nextByKey.get(k);
-          if (!prev || s.level > prev.level) nextByKey.set(k, { ...s, skill_key: k });
-        }
+          for (const s of prev) {
+            const k = normalizeSkillKey(s.skill_key);
+            const existing = nextByKey.get(k);
+            if (!existing || s.level > existing.level) nextByKey.set(k, { ...s, skill_key: k });
+          }
 
-        for (const item of items) {
-          if (!item) continue;
-          const prev = nextByKey.get(item.skill_key);
-          if (!prev || item.level > prev.level) nextByKey.set(item.skill_key, item);
-        }
-        const next = Array.from(nextByKey.values()).filter((s) => {
-          const key = normalizeSkillKey(s.skill_key);
-          const label = formatSkillLabel(s.name, key);
-          const isPlaceholder = !label && (looksLikeUuid(s.name) || looksLikeUuid(key) || /^https?:\/\//i.test(key));
-          // Only drop placeholders that are auto-prefilled (level 0).
-          if (isPlaceholder && s.level <= 0) return false;
-          return true;
-        });
+          for (const item of items) {
+            if (!item) continue;
+            const prevItem = nextByKey.get(item.skill_key);
+            if (!prevItem || item.level > prevItem.level) nextByKey.set(item.skill_key, item);
+          }
 
-        const changed =
-          next.length !== selectedSkills.length ||
-          next.some((n) => {
-            const prev = selectedSkills.find((s) => normalizeSkillKey(s.skill_key) === n.skill_key);
-            if (!prev) return true;
-            return prev.level !== n.level || prev.name !== n.name;
+          const next = Array.from(nextByKey.values()).filter((s) => {
+            const key = normalizeSkillKey(s.skill_key);
+            const label = formatSkillLabel(s.name, key);
+            const isPlaceholder = !label && (looksLikeUuid(s.name) || looksLikeUuid(key) || /^https?:\/\//i.test(key));
+            // Only drop placeholders that are auto-prefilled (level 0).
+            if (isPlaceholder && s.level <= 0) return false;
+            return true;
           });
 
-        if (changed && next.length > 0) setSelectedSkills(next);
+          const changed =
+            next.length !== prev.length ||
+            next.some((n) => {
+              const p = prev.find((s) => normalizeSkillKey(s.skill_key) === n.skill_key);
+              if (!p) return true;
+              return p.level !== n.level || p.name !== n.name;
+            });
+
+          return changed && next.length > 0 ? next : prev;
+        });
       })
       .catch(() => {
         // ignore prefill failures
@@ -402,7 +404,7 @@ export default function SkillsStep() {
     return () => {
       cancelled = true;
     };
-  }, [data, selectedSkills]);
+  }, [data]);
 
   const canNext = selectedSkills.length > 0;
 
