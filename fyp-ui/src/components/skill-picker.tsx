@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import type { BackendSkill } from "@/types/api";
 import { BackendRequestError, getSkillDetail, searchSkills } from "@/lib/backend-api";
 import { lookupSkillMetaByName } from "@/data/skill-meta";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { formatSkillLabel, parseSelectedSkills, quantizeSkillLevel, SELECTED_SKILLS_STORAGE_KEY, SKILL_LEVEL_MAX, SKILL_LEVEL_STEP } from "@/lib/skills-storage";
+import { formatSkillLabel, normalizeSkillKey, parseSelectedSkills, quantizeSkillLevel, SELECTED_SKILLS_STORAGE_KEY, SKILL_LEVEL_MAX, SKILL_LEVEL_STEP } from "@/lib/skills-storage";
 
 export type SelectedSkill = {
   skill_key: string;
@@ -125,7 +125,7 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
 
 type Props = {
   value?: SelectedSkill[];
-  onChange?: (skills: SelectedSkill[]) => void;
+  onChange?: Dispatch<SetStateAction<SelectedSkill[]>>;
 };
 
 export function SkillPicker({ value, onChange }: Props) {
@@ -165,12 +165,12 @@ export function SkillPicker({ value, onChange }: Props) {
     localStorage.setItem(SELECTED_SKILLS_STORAGE_KEY, JSON.stringify(internalSkills));
   }, [internalSkills, value]);
 
-  const setSkills = (next: SelectedSkill[]) => {
+  const setSkills = (next: SetStateAction<SelectedSkill[]>) => {
     if (onChange) onChange(next);
     if (!value) setInternalSkills(next);
   };
 
-  const selectedKeys = useMemo(() => new Set(skills.map((s) => s.skill_key)), [skills]);
+  const selectedKeys = useMemo(() => new Set(skills.map((s) => normalizeSkillKey(s.skill_key))), [skills]);
 
   const mergedResults = useMemo(() => {
     if (!results || results.length === 0) return [];
@@ -341,8 +341,16 @@ export function SkillPicker({ value, onChange }: Props) {
   }, [debouncedQuery]);
 
   const addSkill = (skill: BackendSkill) => {
-    if (selectedKeys.has(skill.skill_key)) return;
-    setSkills([...skills, { skill_key: skill.skill_key, name: skill.name, level: 0 }]);
+    const key = normalizeSkillKey(typeof skill.skill_key === "string" ? skill.skill_key : "");
+    if (!key) return;
+    if (selectedKeys.has(key)) return;
+
+    const label = formatSkillLabel(skill.name, key) || (typeof skill.name === "string" ? skill.name.trim() : "") || key;
+
+    setSkills((prev) => {
+      if (prev.some((s) => normalizeSkillKey(s.skill_key) === key)) return prev;
+      return [...prev, { skill_key: key, name: label, level: 0 }];
+    });
     setQuery("");
     setResults([]);
     setDetailByKey({});
@@ -351,13 +359,13 @@ export function SkillPicker({ value, onChange }: Props) {
     setError(null);
   };
 
-  const removeSkill = (skill_key: string) => {
-    setSkills(skills.filter((s) => s.skill_key !== skill_key));
+  const removeSkillAt = (index: number) => {
+    setSkills((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const updateSkillLevel = (skill_key: string, level: number) => {
+  const updateSkillLevelAt = (index: number, level: number) => {
     const nextLevel = quantizeSkillLevel(level);
-    setSkills(skills.map((s) => (s.skill_key === skill_key ? { ...s, level: nextLevel } : s)));
+    setSkills((prev) => prev.map((s, i) => (i === index ? { ...s, level: nextLevel } : s)));
   };
 
   return (
@@ -436,8 +444,8 @@ export function SkillPicker({ value, onChange }: Props) {
 
       <div className="flex flex-wrap gap-2">
         {skills.length === 0 && <span className="text-sm text-slate-500">No skills selected yet.</span>}
-        {skills.map((skill) => (
-          <Badge key={skill.skill_key} variant="secondary" className="gap-2">
+        {skills.map((skill, idx) => (
+          <Badge key={`${skill.skill_key}:${idx}`} variant="secondary" className="gap-2">
             <span>{formatSkillLabel(skill.name, skill.skill_key) || "Unknown skill"}</span>
 
             <span className="text-xs text-slate-600">Lv {formatLevel(skill.level)}</span>
@@ -448,8 +456,8 @@ export function SkillPicker({ value, onChange }: Props) {
               max={SKILL_LEVEL_MAX}
               step={SKILL_LEVEL_STEP}
               value={skill.level}
-              onChange={(e) => updateSkillLevel(skill.skill_key, Number(e.target.value))}
-              aria-label={`Set level for ${skill.name}`}
+              onChange={(e) => updateSkillLevelAt(idx, Number(e.target.value))}
+              aria-label={`Set level for ${formatSkillLabel(skill.name, skill.skill_key) || skill.skill_key}`}
             />
 
             <Button
@@ -457,8 +465,8 @@ export function SkillPicker({ value, onChange }: Props) {
               variant="ghost"
               size="icon-sm"
               className="h-6 w-6 rounded-full"
-              onClick={() => removeSkill(skill.skill_key)}
-              aria-label={`Remove ${skill.name}`}
+              onClick={() => removeSkillAt(idx)}
+              aria-label={`Remove ${formatSkillLabel(skill.name, skill.skill_key) || skill.skill_key}`}
             >
               ×
             </Button>
