@@ -1,193 +1,78 @@
-# FYP FastAPI Backend
+# 진로 추천 서비스 백엔드
 
-FastAPI backend for the career counseling project. It supports user registration/login, protected profile management, skill extraction, and recommendation endpoints for jobs and majors.
+개인 졸업 프로젝트의 FastAPI API입니다. 프로젝트 전체 배경과 담당 범위는 [최상위 README](../README.md)에 정리했습니다.
 
-## Tech Stack
+## 주요 구성
 
-- Python 3.11+
-- FastAPI
-- SQLAlchemy ORM + MySQL (PyMySQL driver)
-- Passlib[bcrypt] for password hashing
-- python-jose for JWT handling
+| 영역 | 코드 |
+| --- | --- |
+| API 등록과 시작 시 자원 로딩 | [app/main.py](app/main.py) |
+| DB 설정·엄격 모드 | [app/config.py](app/config.py) |
+| TF-IDF 기반 역량 추출 | [app/services/skill_extractor.py](app/services/skill_extractor.py) |
+| DB 역량명 매칭 | [app/services/nlp_extractor.py](app/services/nlp_extractor.py) |
+| 직업·전공 추천 모델과 메타데이터 | [app/services/ml_recommender.py](app/services/ml_recommender.py) |
 
-## Environment Configuration
+Llama 학습·추론 실험은 [별도 노트북](../Model/Train.ipynb)에서 수행합니다. API의 TF-IDF·DB 매칭 경로와 같은 기능으로 간주하지 않습니다.
 
-Copy `.env.example` to `.env` and adjust the values:
+## 실행에 필요한 자원
 
-```env
-APP_NAME=FYP Backend
-ENVIRONMENT=development
-DEBUG=true
-DB_HOST=localhost
-DB_PORT=3306
-DB_NAME=fyp_careerpath
-DB_USER=root
-DB_PASSWORD=root
-DB_CHARSET=utf8mb4
+- Python 3.11 이상과 `requirements.txt` 의존성
+- `.env.example`을 복사한 `.env`
+- ESCO 및 직업·전공 추천용 MySQL 데이터와 테이블
+- `app/ml_assets/job_recommender_fast.pkl`의 실제 모델 파일과 `skill_index.json`
+- 추천 결과를 직업·역량·전공에 연결하는 메타데이터
 
-# Optional (legacy):
-# DB_URL=mysql+pymysql://root:password@localhost:3306/fyp_careerpath?charset=utf8mb4
-JWT_SECRET=change-me
-JWT_ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=60
-```
+추천 모델이 Git LFS 포인터로 내려온 경우 실제 모델 파일을 받아야 합니다. 학습·추천 자원의 준비 상태는 [app/ml_assets/](app/ml_assets/)와 [데이터 준비 스크립트](scripts/)에서 확인할 수 있습니다.
 
-The app expects an existing MySQL schema for the careerpath dataset (job/skill/job_skill/skill_tag).
-
-Note:
-
-- The careerpath dataset uses MySQL via the `DB_*` settings above (raw-query access).
-- The SQLAlchemy ORM (auth/users/admin tables) defaults to a local sqlite file in development (`dev.db`).
-  If you want ORM tables in MySQL, either set `ORM_DB_URL=mysql+pymysql://...` explicitly,
-  or set `ORM_USE_MYSQL=true` to reuse the same `DB_*` MySQL credentials.
-
-## Local Development
-
-### 0) MySQL (Recommended: Docker)
-
-You can start MySQL using the workspace root `docker-compose.yml`.
+## 환경 변수
 
 ```bash
-cd ..
-docker compose up -d mysql
+cp .env.example .env
+python -m pip install -r requirements.txt
 ```
 
-Defaults:
+| 설정 | 역할 |
+| --- | --- |
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | 직업·역량 데이터용 MySQL 연결 |
+| `ORM_DB_URL` 또는 `ORM_USE_MYSQL` | 인증·사용자 등 ORM 테이블의 저장소 선택 |
+| `JWT_SECRET`, `JWT_ALGORITHM` | 인증 토큰 설정 |
+| `CORS_ORIGINS` | 웹 화면에서 API 호출을 허용할 주소 |
 
-- MySQL: `localhost:3306`
-- `root/root`
-- DB: `fyp_careerpath`
+직업·역량 데이터 접근과 인증용 ORM 저장소는 별도 설정 경로가 있습니다. 개발용 SQLite 설정만으로 MySQL 추천 데이터까지 준비되는 것은 아닙니다. `.env.example`과 [설정 코드](app/config.py)의 값을 함께 맞춰야 합니다.
 
-The initial schema (empty tables) is created automatically from `fyp-db/init/*.sql`.
+현재 저장소에는 최상위 `docker-compose.yml`이나 `fyp-db/init/`가 없습니다. MySQL을 별도로 준비하고, [scripts/](scripts/)의 스키마·가져오기 스크립트를 사용하는 데이터 구성에 맞춰 적용합니다.
 
-1. Create and activate a virtual environment.
+## 실행
 
-   ```bash
-   python -m venv .venv
-   .venv\Scripts\activate
-   ```
-
-2. Install dependencies.
-
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. Apply database migrations (for now the app auto-creates tables, so ensure the configured database user has DDL permissions).
-
-   - ORM tables are auto-created only when using sqlite (development default).
-   - For MySQL, provide a migrated schema (or switch ORM to sqlite via the default `dev.db`).
-
-4. Launch the API server.
-
-   ```bash
-   uvicorn app.main:app --reload --port 8002
-   ```
-
-5. Quick checks
-
-- API heartbeat: `GET http://127.0.0.1:8002/health/`
-- DB connectivity: `GET http://127.0.0.1:8002/health/db`
-
-## Frontend (Next.js) Integration
-
-Backend base URL (local):
-
-- `http://127.0.0.1:8002`
-
-Frontend must define the API base URL (example: `.env.local` in your Next.js project):
-
-```env
-NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8002
-```
-
-If this env var is missing, the frontend cannot send login/recommendation requests and will show an error.
-
-### CORS
-
-For local development, the backend allows these origins by default:
-
-- `http://localhost:3000`
-- `http://127.0.0.1:3000`
-
-To override allowed origins, set `CORS_ORIGINS` in `.env` as a JSON array:
-
-```env
-CORS_ORIGINS=["http://localhost:3000","http://127.0.0.1:3000"]
-```
-
-## API Overview
-
-- `POST /auth/register` — Create a new user account.
-- `POST /auth/login` — Obtain a JWT bearer token.
-- `GET /users/me` — Fetch the authenticated user profile (includes `is_admin`).
-- `PUT /users/me` — Update profile fields (name, location, free-text interests/skills).
-- `POST /recommend/nlp/extract-skills` — Extract structured skills from user-provided text.
-- `POST /recommend/jobs` — Return scored job matches for the authenticated user.
-- `POST /recommend/majors` — Return ranked majors for the authenticated user.
-
-Admin:
-
-- `GET /admin/stats` — Admin analytics. Access is granted by setting `ADMIN_EMAILS` (allowlist) in `.env`.
-  - JSON array: `ADMIN_EMAILS=["admin@example.com","ops@example.com"]`
-  - Comma-separated: `ADMIN_EMAILS=admin@example.com,ops@example.com`
-  - Comparison is `trim + lowercase`.
-
-To create an admin user locally:
+`fyp-backend`에서 실행합니다.
 
 ```bash
-python scripts/create_admin.py --email admin@example.com
+uvicorn app.main:app --reload --port 8001
 ```
 
-Careerpath (existing MySQL dataset):
+- API 문서: `http://127.0.0.1:8001/docs`
+- 상태 확인: `http://127.0.0.1:8001/health/`
+- DB 상태 확인: `http://127.0.0.1:8001/health/db`
+- 웹 화면 API 주소: `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8001`
 
-- `GET /api/skills/search?q=...` — Search up to 50 skills by name.
-- `GET /api/jobs/{job_id}` — Fetch job detail.
-- `GET /api/jobs/{job_id}/skills` — Fetch up to 300 skills linked to a job.
-- `POST /api/recommend/jobs` — Recommend up to 5 jobs from skills. Preferred payload: `skills: [{ skill_key, level(0..5) }]` (legacy `skill_keys` is still accepted temporarily). Returns `X-Recommendation-Id` header for analytics.
-- `POST /api/recommend/jobs/pick` — Log a pick from a recommendation list (body: `{ recommendation_id, chosen_job_id }`). Server computes chosen_rank.
-- `GET /api/skills/{skill_key}/resources` — Learning resources (optional table `skill_resource`; returns [] if not configured).
-- `GET /api/db/stats` — Row counts for key tables.
+앱 시작 단계에서 추천 모델과 메타데이터를 로딩합니다. 이 단계가 실패하면 상태 확인 API도 호출할 수 없으므로, 먼저 서버 시작 로그의 모델·DB 오류를 확인해야 합니다.
 
-## Testing
+## API 영역
 
-For convenience you can point the tests to a local SQLite file by setting `DB_URL` before running pytest:
+| 영역 | 예시 |
+| --- | --- |
+| 인증·사용자 | `/auth/register`, `/auth/login`, `/users/me` |
+| 역량·직업 탐색 | `/api/skills/search`, `/api/jobs/{job_id}` |
+| 추천 | `/recommend/nlp/extract-skills`, `/api/recommend/jobs` |
+| 전공·학습 경로 | 전공·교육·학습 경로 관련 라우터 |
+| 관리자 | `/admin/stats` |
+
+전체 요청·응답은 실행한 서버의 `/docs`와 [라우터 코드](app/api/routes/)가 기준입니다.
+
+## 테스트
 
 ```bash
-set DB_URL=sqlite:///./test.db
-pytest
+python -m pytest
 ```
 
-## Share via ZIP
-
-From PowerShell, you can create a ZIP that excludes the virtualenv/cache files and `.env` (and, by default, the large model folder `app/nlp`).
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/make_zip.ps1
-```
-
-Output ZIP location: `dist/`
-
-To include models:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/make_zip.ps1 -IncludeModels
-```
-
-## Project Layout
-
-```
-app/
-  config.py
-  database.py
-  main.py
-  models/
-  routers/
-  schemas/
-  services/
-  utils/
-.env.example
-pyproject.toml
-requirements.txt
-README.md
-```
+[tests/](tests/)에는 인증, 프로필, 역량 검색, 추천·전공 API 등의 테스트가 있습니다. DB·모델 자원과 테스트 fixture 구성을 확인한 뒤 실행합니다.
