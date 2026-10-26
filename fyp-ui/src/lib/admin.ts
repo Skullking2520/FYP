@@ -8,10 +8,6 @@ function getAdminEmailSet(): Set<string> {
     .filter(Boolean);
 
   const set = new Set(values);
-  // Safe default for local/dev: backend commonly seeds this admin user.
-  if (set.size === 0) {
-    set.add("admin@admin.com");
-  }
   return set;
 }
 

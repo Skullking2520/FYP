@@ -83,7 +83,7 @@ class Settings(BaseSettings):
     db_user: str = Field(default="root", validation_alias="DB_USER")
     db_password: str = Field(default="password", validation_alias="DB_PASSWORD")
     db_charset: str = Field(default="utf8mb4", validation_alias="DB_CHARSET")
-    jwt_secret: str = Field(default="change-me")
+    jwt_secret: str = Field(default="", validation_alias="JWT_SECRET")
     jwt_algorithm: str = Field(default="HS256")
     access_token_expire_minutes: int = Field(default=60)
     cors_origins: list[str] = Field(
@@ -116,12 +116,19 @@ class Settings(BaseSettings):
     # Defaults to False but is auto-enabled when MySQL is configured (see is_sql_strict_mode).
     sql_strict: bool = Field(default=False, validation_alias="SQL_STRICT")
 
+    @field_validator("jwt_secret")
+    @classmethod
+    def _validate_jwt_secret(cls, value: str) -> str:
+        if len(value.encode("utf-8")) < 32 or any(char.isspace() for char in value):
+            raise ValueError("Set JWT_SECRET to a random value of at least 32 bytes without whitespace.")
+        return value
+
     @field_validator("admin_emails", mode="before")
     @classmethod
     def _validate_admin_emails(cls, v: Any) -> list[str]:
         return _parse_admin_emails(v)
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore", hide_input_in_errors=True)
 
 
 @lru_cache
