@@ -31,6 +31,7 @@ cp .env.example .env.local
 `.env.local`의 API 주소를 백엔드와 맞춥니다.
 
 ```env
+UPSTREAM_API_BASE_URL=http://127.0.0.1:8001
 NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8001
 ```
 
@@ -51,3 +52,5 @@ npm run build
 ```
 
 명령은 [package.json](package.json)에 정의돼 있습니다. 백엔드에 전달하는 필드와 API 경로는 [BACKEND_REQUESTS.md](BACKEND_REQUESTS.md)도 함께 참고하세요.
+
+서버 프록시는 `UPSTREAM_API_BASE_URL`을 먼저 사용하고, 없으면 `API_BASE_URL`, `NEXT_PUBLIC_API_BASE_URL` 순서로 읽습니다. 서로 다른 주소가 남아 있으면 브라우저 요청과 프록시의 대상이 달라질 수 있습니다. `NEXT_PUBLIC_*` 변수에는 비밀키를 넣지 않습니다.

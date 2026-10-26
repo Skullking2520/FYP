@@ -20,7 +20,7 @@
 - 전체 역량을 입력에 한 번에 나열하는 방식의 제약을 확인하고, 후보 생성과 ESCO 역량 연결을 분리해 실험했습니다.
 - 사용자 정보, 역량, 직업·전공 추천을 다루는 API와 웹 화면을 구성했습니다.
 
-## 어디서부터 볼 수 있나요?
+## 코드 안내
 
 | 영역 | 설명 | 시작 위치 |
 | --- | --- | --- |
@@ -60,3 +60,9 @@ npm run dev
 ## 기술
 
 Python · PyTorch · Transformers · PEFT · QLoRA · FastAPI · SQLAlchemy · MySQL · Next.js · TypeScript
+
+## 관련 저장소
+
+[FYP_ui-backend](https://github.com/Skullking2520/FYP_ui-backend)는 별도 통합 작업 이력, [FYP_BACKEND](https://github.com/Skullking2520/FYP_BACKEND)와 [FYP_UI](https://github.com/Skullking2520/FYP_UI)는 분리 앱 작업 이력입니다. 세 저장소는 현재 비공개이며 자동으로 동기화되지 않습니다. 공개 포트폴리오의 시작점은 이 저장소입니다.
+
+환경 예시는 설정 항목을 안내하며 실제 인증값·학습 데이터의 접근 권한을 제공하지 않습니다. `.gitignore`는 과거 커밋의 노출을 제거하지 않습니다.
