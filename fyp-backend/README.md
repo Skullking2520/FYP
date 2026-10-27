@@ -26,6 +26,8 @@ Llama 학습·추론 실험은 [별도 노트북](../Model/Train.ipynb)에서 �
 
 ## 환경 변수
 
+`JWT_SECRET`은 공백 없는 무작위 값으로 32바이트 이상 지정해야 합니다. 누락되거나 짧으면 설정 검증에서 시작을 중단합니다. 예를 들어 로컬에서 `python -c "import secrets; print(secrets.token_urlsafe(32))"`로 생성해 `.env`에 저장할 수 있습니다. 키를 바꾸면 기존 로그인 토큰은 다시 발급받아야 합니다.
+
 ```bash
 cp .env.example .env
 python -m pip install -r requirements.txt
@@ -77,8 +79,12 @@ python -m pytest
 
 [tests/](tests/)에는 인증, 프로필, 역량 검색, 추천·전공 API 등의 테스트가 있습니다. DB·모델 자원과 테스트 fixture 구성을 확인한 뒤 실행합니다.
 
-`JWT_SECRET`은 공백 없는 무작위 값으로 32바이트 이상 지정해야 합니다. 누락되거나 짧으면 설정 검증에서 시작을 중단합니다. 예를 들어 로컬에서 `python -c "import secrets; print(secrets.token_urlsafe(32))"`로 생성해 `.env`에 저장할 수 있습니다. 키를 바꾸면 기존 로그인 토큰은 다시 발급받아야 합니다.
+## 관리자 계정
 
-### Administrator provisioning
+관리자 허용 목록에 지정된 주소는 일반 회원가입으로 등록할 수 없습니다. 백엔드 디렉터리에서 기존 CLI로 계정을 생성합니다.
 
-Public registration rejects addresses configured as administrators. Create the account with `python -m scripts.create_admin --email admin@example.com` from the backend directory. Configure a strong `JWT_SECRET` before starting the service. Ordinary accounts do not have email verification; the administrator allowlist is not a substitute for verified identity.
+```sh
+python -m scripts.create_admin --email admin@example.com
+```
+
+위 주소는 예시입니다. 실제 관리자 주소와 충분히 긴 `JWT_SECRET`을 설정해야 합니다. 일반 계정의 이메일 검증은 구현돼 있지 않으며, 관리자 허용 목록이 이메일 소유권을 검증하지는 않습니다.

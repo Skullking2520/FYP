@@ -20,6 +20,16 @@
 - 전체 역량을 입력에 한 번에 나열하는 방식의 제약을 확인하고, 후보 생성과 ESCO 역량 연결을 분리해 실험했습니다.
 - 사용자 정보, 역량, 직업·전공 추천을 다루는 API와 웹 화면을 구성했습니다.
 
+## 구성 한눈에 보기
+
+```mermaid
+flowchart LR
+    UI[Next.js 웹 화면] --> API[FastAPI API]
+    API --> DB[(MySQL · ORM 저장소)]
+    API --> ML[TF-IDF · 추천 모델 자원]
+    Notebook[Llama 학습 노트북] -. 별도 실험 .-> Adapter[어댑터 · 실험 출력]
+```
+
 ## 코드 안내
 
 | 영역 | 설명 | 시작 위치 |
