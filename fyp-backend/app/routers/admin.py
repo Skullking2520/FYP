@@ -32,7 +32,7 @@ def _mask_db_url(db_url: str) -> str:
     try:
         return str(make_url(db_url).set(password="***"))
     except Exception:
-        return db_url
+        return "<invalid database URL>"
 
 
 def _require_admin(current_user: User = Depends(get_current_user)) -> User:
@@ -45,8 +45,7 @@ def _require_admin_stats(current_user: User = Depends(get_current_user)) -> User
     email = (current_user.email or "").strip()
     is_admin = is_admin_email(email)
 
-    # Diagnostic log (non-sensitive): email + boolean only.
-    logger.info("admin.stats email=%s is_admin=%s", email, is_admin)
+    logger.info("admin.stats user_id=%s is_admin=%s", current_user.id, is_admin)
 
     if not is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")

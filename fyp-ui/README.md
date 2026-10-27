@@ -1,57 +1,58 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 진로 추천 서비스 웹 화면
 
-## Getting Started
+개인 졸업 프로젝트의 Next.js 프론트엔드입니다. 사용자 경험과 역량을 입력하고 직업·전공·학습 경로를 탐색하는 화면을 제공합니다.
 
-## Backend 연결 (로컬 개발)
+[프로젝트 전체 소개](../README.md) · [백엔드 실행 안내](../fyp-backend/README.md)
 
-이 프론트엔드는 FastAPI 백엔드에 의존합니다.
+## 주요 화면
 
-1. 백엔드 실행 (기본 포트: 8001)
+- 가입·로그인과 사용자 프로필
+- 경험·학업·역량 입력
+- 직업·전공 추천과 상세 탐색
+- 학습 경로와 관리자 화면
+
+페이지 구현은 [src/app/](src/app/), API 연결은 [src/lib/](src/lib/)에서 확인할 수 있습니다.
+
+## 실행 순서
+
+먼저 별도 터미널에서 백엔드와 필요한 DB·모델 자원을 준비합니다.
 
 ```bash
 cd ../fyp-backend
 uvicorn app.main:app --reload --port 8001
 ```
 
-2. 프론트 환경변수 설정
+`fyp-ui`에서 환경 변수를 준비합니다.
 
-`.env.example`을 참고해서 `.env.local`에 아래 값을 설정합니다.
+```bash
+cp .env.example .env.local
+```
+
+`.env.local`의 API 주소를 백엔드와 맞춥니다.
 
 ```env
+UPSTREAM_API_BASE_URL=http://127.0.0.1:8001
 NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8001
 ```
 
-3. 프론트 실행
-
-First, run the development server:
-
 ```bash
+npm ci
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+브라우저에서 `http://localhost:3000`을 엽니다. 백엔드가 시작되지 않았거나 DB·모델 자원이 준비되지 않으면 인증·추천 요청도 정상 처리되지 않습니다.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 확인 명령
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run typecheck
+npm run lint
+npm run test
+npm run build
+```
 
-## Learn More
+명령은 [package.json](package.json)에 정의돼 있습니다. 백엔드에 전달하는 필드와 API 경로는 [BACKEND_REQUESTS.md](BACKEND_REQUESTS.md)도 함께 참고하세요.
 
-To learn more about Next.js, take a look at the following resources:
+서버 프록시는 `UPSTREAM_API_BASE_URL`을 먼저 사용하고, 없으면 `API_BASE_URL`, `NEXT_PUBLIC_API_BASE_URL` 순서로 읽습니다. 서로 다른 주소가 남아 있으면 브라우저 요청과 프록시의 대상이 달라질 수 있습니다. `NEXT_PUBLIC_*` 변수에는 비밀키를 넣지 않습니다.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+관리자 표시용 `NEXT_PUBLIC_ADMIN_EMAIL(S)`는 브라우저에 공개되는 UI 설정이며 API 권한 검사를 대체하지 않습니다. 기본 관리자 이메일은 포함하지 않습니다.

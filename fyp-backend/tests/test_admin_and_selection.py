@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from app.database import SessionLocal
+from app.models.user import User
+from app.utils.password_hash import hash_password
 from app.models.jobs import Job
 from app.models.recommendation_event import RecommendationEvent
 
@@ -8,6 +10,12 @@ from app.models.recommendation_event import RecommendationEvent
 def _register(client, *, email: str, password: str = "SecretPass123") -> None:
     r = client.post("/auth/register", json={"email": email, "password": password})
     assert r.status_code == 201
+
+
+def _provision_admin(email: str) -> None:
+    with SessionLocal() as db:
+        db.add(User(email=email, password=hash_password("SecretPass123")))
+        db.commit()
 
 
 def _login(client, *, email: str, password: str = "SecretPass123") -> str:
@@ -25,7 +33,7 @@ def test_admin_stats_requires_admin(client) -> None:
 
 def test_selected_job_updates_stats(client) -> None:
     # Create admin user
-    _register(client, email="admin@example.com")
+    _provision_admin("admin@example.com")
     admin_token = _login(client, email="admin@example.com")
 
     # Create normal user
@@ -65,7 +73,7 @@ def test_selected_job_updates_stats(client) -> None:
 
 
 def test_admin_skill_reco_picks_series_from_selected_job(client) -> None:
-    _register(client, email="admin@example.com")
+    _provision_admin("admin@example.com")
     admin_token = _login(client, email="admin@example.com")
 
     _register(client, email="student@example.com")

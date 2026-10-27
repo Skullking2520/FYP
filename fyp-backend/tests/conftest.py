@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,8 @@ from fastapi.testclient import TestClient
 
 def pytest_configure() -> None:
     # Ensure the SQLAlchemy engine is created against sqlite for tests.
+    os.environ["DEBUG"] = "false"
+    os.environ["JWT_SECRET"] = secrets.token_urlsafe(32)
     os.environ.setdefault("DB_URL", "sqlite:///./test.db")
     os.environ["ORM_DB_URL"] = "sqlite:///./test.db"
     os.environ["ORM_USE_MYSQL"] = "false"
