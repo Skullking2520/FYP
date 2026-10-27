@@ -1,4 +1,4 @@
-# Skill extraction experiment
+# Llama skill extraction experiment
 
 This folder contains the skill-extraction training notebook. It does not bundle the base model weights or a complete training dataset. The notebook uses `meta-llama/Llama-3.2-1B-Instruct`.
 
